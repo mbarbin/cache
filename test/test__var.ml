@@ -6,56 +6,146 @@
 
 open! Import
 
-let print_stamp s = print_dyn (Cache.Clock.Stamp.to_dyn s)
+(* @mdexp
+
+   # Var
+
+   A var is the mutable leaf everything else is ultimately derived from.
+   It holds a value, remembers the clock reading of its last write, and
+   knows which nodes are watching it right now.
+
+   Reading one with `Var.peek` records nothing: it is a plain field
+   access, and the reader does not become dependent on the var. Depending
+   on a var means watching it --- see [Node](test__node.md). *)
+
+let print_stamp s = print_dyn (Cache.Private.Clock.Stamp.to_dyn s)
+
+(* @mdexp
+
+   ## create
+
+   Creating a var is not a write. It does not advance the clock, and the
+   var starts at `Stamp.zero` --- the reading that means "never
+   written". *)
 
 let%expect_test "create starts at Stamp.zero" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   require_equal (module Int) (Cache.Var.peek v) 1;
-  require_equal (module Cache.Clock.Stamp) (Cache.Var.stamp v) Cache.Clock.Stamp.zero;
+  require_equal
+    (module Cache.Private.Clock.Stamp)
+    (Cache.Private.var_stamp v)
+    Cache.Private.Clock.Stamp.zero;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   That holds however busy the cache already is. A var created long after
+   other vars have been written still starts at zero, rather than at the
+   clock's current reading: `create` never looks at the clock, only `set`
+   does.
+
+   Nothing about recomputation depends on that. A watch node learns its
+   var moved by being *told* --- `set` walks the var's watchers and marks
+   them --- and `refresh` never reads a var's stamp at all. What the zero
+   buys is an answer to a question someone can ask: the stamp is zero
+   exactly when the var has never been written, where stamping "now" at
+   creation would leave never-written and written-on-creation
+   indistinguishable. *)
+
 let%expect_test "create starts at Stamp.zero even after the cache has ticked" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache "a0" in
   Cache.Var.set a "a1";
-  (* [cache] is now at reading 1. A var created afterwards still starts
-     at [Stamp.zero], not "the cache's current reading" — [create]
-     doesn't read the cache at all, only [set] does. *)
+  (* @mdexp
+
+     `cache` is now at reading 1. A var created at this point still
+     starts at zero: *)
+  (* @mdexp.code *)
   let b = Cache.Var.create cache "b0" in
-  require_equal (module Cache.Clock.Stamp) (Cache.Var.stamp b) Cache.Clock.Stamp.zero;
+  require_equal
+    (module Cache.Private.Clock.Stamp)
+    (Cache.Private.var_stamp b)
+    Cache.Private.Clock.Stamp.zero;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## set
+
+   `set` replaces the value and advances the shared clock by one; that
+   new reading becomes the var's stamp. Two writes, two readings: *)
+
 let%expect_test "set replaces the value and ticks the shared cache" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   Cache.Var.set v 2;
   require_equal (module Int) (Cache.Var.peek v) 2;
-  print_stamp (Cache.Var.stamp v);
+  print_stamp (Cache.Private.var_stamp v);
   [%expect {| 1 |}];
   Cache.Var.set v 3;
   require_equal (module Int) (Cache.Var.peek v) 3;
-  print_stamp (Cache.Var.stamp v);
+  print_stamp (Cache.Private.var_stamp v);
   [%expect {| 2 |}];
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   The clock is shared; the stamps are not. Writing one var moves the
+   clock, which every var in the cache can see, but leaves every other
+   var's own stamp exactly where it was. That is what lets a node compare
+   its parent's stamp against its own last look and conclude nothing
+   relevant happened, even though the cache as a whole has moved on. *)
+
 let%expect_test "two vars sharing a cache: only the one written ticks" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache "a0" in
   let b = Cache.Var.create cache "b0" in
   Cache.Var.set a "a1";
-  print_stamp (Cache.Var.stamp a);
+  print_stamp (Cache.Private.var_stamp a);
   [%expect {| 1 |}];
-  (* [b] keeps its own stamp even though the shared cache moved on. *)
-  require_equal (module Cache.Clock.Stamp) (Cache.Var.stamp b) Cache.Clock.Stamp.zero;
+  (* @mdexp
+
+     `b` keeps its own stamp, and its own value, even though the clock it
+     shares with `a` has moved on: *)
+  (* @mdexp.code *)
+  require_equal
+    (module Cache.Private.Clock.Stamp)
+    (Cache.Private.var_stamp b)
+    Cache.Private.Clock.Stamp.zero;
   require_equal (module String) (Cache.Var.peek b) "b0";
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## Writing from inside a computation is refused
+
+   A node's `f` must not write a var. The write would invalidate whatever
+   is watching that var --- possibly including the very node that is
+   part-way through its own refresh --- and the update would be dropped
+   silently, leaving a node holding a value it should have recomputed.
+
+   Rather than let that happen quietly, `set` raises `Invalid_argument`
+   when a computation is in progress. The failed refresh leaves nothing
+   wedged: writes from outside work as before, and the node recomputes
+   the next time it is read (raising again, `f` being unchanged).
+
+   A node whose `f` writes another var, forced: *)
+
 let%expect_test "set raises when called from inside a node's computation" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   let other = Cache.Var.create cache 10 in
@@ -69,36 +159,54 @@ let%expect_test "set raises when called from inside a node's computation" =
     {|
     Invalid_argument("Cache.Var.set: a var cannot be set while a node is being computed")
     |}];
-  (* The failed refresh doesn't leave the cache wedged: writes from
-     outside still work, and the node still recomputes (and raises
-     again, [f] being unchanged). *)
+  (* @mdexp
+
+     The failed refresh leaves nothing wedged. A write from outside still
+     works: *)
+  (* @mdexp.code *)
   Cache.Var.set other 20;
   require_equal (module Int) (Cache.Var.peek other) 20;
+  (* @mdexp.end *)
   ()
 ;;
 
-let%expect_test "reading a node from inside a computation: allowed, but untracked" =
+(* @mdexp
+
+   ### From a computation's own `f`
+
+   A `Computation.create` closure is no exception. The guard covers the
+   whole of a `Node.value` call, whatever kind of node that call runs, so
+   a `set` from a computation's own `f` is refused exactly as one from a
+   `map`'s is.
+
+   The var written below is one the computation does not read, and has no
+   node watching it at all. It is still refused: the check is on a refresh
+   being in flight, not on who the cascade would have reached: *)
+
+let%expect_test "set raises when called from a computation's own f" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
-  let v = Cache.Var.create cache 1 in
-  let w = Cache.Var.create cache 100 in
-  let inner = Cache.Node.map (Cache.Var.watch w) ~f:(fun x -> x + 1) in
-  let outer =
-    Cache.Node.map (Cache.Var.watch v) ~f:(fun x ->
-      (* A nested pull, not a write: nothing is told anything, so unlike
-         [Var.set] above this doesn't raise. *)
-      x + Cache.Node.value inner)
-  in
-  require_equal (module Int) (Cache.Node.value outer) 102;
-  (* The flag was released on the way out — writing still works. *)
-  Cache.Var.set w 200;
-  (* But [outer] was built from [v] alone: reading [inner] inside [f]
-     is exactly as untracked a dependency as [Var.peek] would be, so
-     [outer] is not stale here and keeps its value. Nothing about the
-     graph is broken — [outer] simply never depended on [w]. Building
-     [outer] with [map2] over [inner] is what makes that a dependency. *)
-  require_equal (module Int) (Cache.Node.value outer) 102;
-  (* A write to what [outer] *does* depend on picks up the new [inner]. *)
-  Cache.Var.set v 2;
-  require_equal (module Int) (Cache.Node.value outer) 203;
+  let other = Cache.Var.create cache 10 in
+  let comp = Cache.Computation.create cache ~f:(fun () -> Cache.Var.set other 20) in
+  require_does_raise (fun () : unit -> Cache.Node.value (Cache.Computation.node comp));
+  [%expect
+    {|
+    Invalid_argument("Cache.Var.set: a var cannot be set while a node is being computed")
+    |}];
+  (* @mdexp
+
+     And refused before anything is mutated, not rolled back after the
+     fact --- `other` still holds what it held: *)
+  (* @mdexp.code *)
+  require_equal (module Int) (Cache.Var.peek other) 10;
+  (* @mdexp.end *)
   ()
 ;;
+
+(* @mdexp
+
+   Reading, by contrast, is allowed from inside a computation and does
+   not raise --- but records no dependency either, which is a trap of a
+   different kind. That is a story spanning `Var`, `Node` and
+   `Computation` rather than a fact about `set`, and it has a chapter of
+   its own: [Invalid uses](invalid_uses.md). *)

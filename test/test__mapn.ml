@@ -6,30 +6,51 @@
 
 open! Import
 
-(* [map2]/[map3]/... each fold their arity's stamps together with one big
-   [||] (see [node.ml]'s [refresh]) — [stamp_a > checked_at || stamp_b > checked_at || ...] — and a test that only ever moves the *last*
-   component only ever exercises that last disjunct as the reason
-   [stale] came out [true]; the earlier ones never get to be the one
-   that decides it. A coverage report caught exactly that: [map3]
-   never shown invalidated by its first or second component. Every test
-   below sets each component in turn, on its own, specifically to close
-   that gap for every position, not just the last one.
+(* @mdexp
 
-   Kept in its own file, one [%expect_test] per arity, rather than folded
-   into [test__node.ml]: this is the one part of the library where a new
-   arity is expected to keep showing up ([map4], [map5], and on for as
-   many as turn out to be wanted) — small, repetitive, and otherwise
-   exactly the kind of thing
-   that buries the more varied tests living alongside it in noise. Adding
-   [mapN] means adding one more block here, following the same template
-   as [map2]/[map3] below: one var per component, seeded with a distinct
-   power of ten (so the printed value also pins down *which* component a
-   change landed on, not just that recompute happened), summed by [f],
-   each component bumped once in its own step with a [print] right after
-   to check [value]/[calls] moved by exactly one, and a final [print]
-   with no further write to confirm settling. *)
+   # The mapN family
+
+   `map2`, `map3`, and whichever arities come after them, all decide
+   staleness the same way: they fold their components' stamps together
+   with one big disjunction --- stale if the first component moved, or
+   the second, or the third. Every component is symmetric in that
+   expression, and none of them is special.
+
+   Which is exactly what makes the family easy to under-test. A test that
+   only ever writes to the *last* component only ever exercises the last
+   disjunct as the reason staleness came out true; the earlier ones never
+   get to be the one that decides it, and a bug that dropped a component
+   from the fold would go unnoticed. A coverage report caught precisely
+   that here: `map3` had never been shown invalidated by its first or its
+   second component.
+
+   So each test in this chapter writes to every component in turn, on
+   its own, to close that gap at every position rather than only the
+   last.
+
+   ## Why this is a chapter of its own
+
+   This is the one part of the library where new code is expected to keep
+   arriving --- `map4`, `map5`, and on for as many arities as turn out to
+   be wanted. The tests are small, repetitive, and near-identical to one
+   another, which is precisely what buries more varied tests in noise when
+   they share a file. Kept apart, [Node](test__node.md) stays readable and
+   this chapter stays a checklist. *)
+
+(* @mdexp
+
+   ## map2
+
+   Two vars, seeded with distinct powers of ten so that the printed sum
+   also pins down *which* component a change landed on, not merely that a
+   recompute happened. Each is written once, in its own step, with the
+   value and the call count checked immediately after; a final check with
+   no write in between confirms the node has settled.
+
+   This is the template an added arity follows: *)
 
 let%expect_test "map2: each component independently triggers a recompute" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache 1 in
   let b = Cache.Var.create cache 10 in
@@ -48,12 +69,25 @@ let%expect_test "map2: each component independently triggers a recompute" =
   check ~value:12 ~calls:2;
   Cache.Var.set b 20;
   check ~value:22 ~calls:3;
-  (* Re-reading without a further write doesn't re-fire [f]. *)
+  (* @mdexp
+
+     And it settles: reading again with no write in between does not
+     re-fire `f`. *)
+  (* @mdexp.code *)
   check ~value:22 ~calls:3;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## map3
+
+   The same shape at arity three --- the one the coverage gap was
+   actually found in. *)
+
 let%expect_test "map3: each component independently triggers a recompute" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache 1 in
   let b = Cache.Var.create cache 10 in
@@ -79,7 +113,23 @@ let%expect_test "map3: each component independently triggers a recompute" =
   check ~value:122 ~calls:3;
   Cache.Var.set c 200;
   check ~value:222 ~calls:4;
-  (* Re-reading without a further write doesn't re-fire [f]. *)
+  (* @mdexp
+
+     Settling, as before: *)
+  (* @mdexp.code *)
   check ~value:222 ~calls:4;
+  (* @mdexp.end *)
   ()
 ;;
+
+(* @mdexp
+
+   ## Adding an arity
+
+   Adding `mapN` means adding one more block here, on the template of
+   `map2` and `map3`: one var per component, each seeded with a distinct
+   power of ten, summed by `f`; each component bumped once in its own
+   step with a check right after that value and call count each moved by
+   exactly one; and a final check, with no further write, that reading
+   again recomputes nothing. Then a `##` section saying which arity it
+   is. *)

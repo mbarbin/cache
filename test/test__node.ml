@@ -6,17 +6,55 @@
 
 open! Import
 
+(* @mdexp
+
+   # Node
+
+   A node is a memoized computation over vars and over other nodes. It
+   remembers the value it last produced, the clock reading at which that
+   value last changed, and the reading at which it last checked ---
+   which, compared against its parents' readings, is what lets it decide
+   it has nothing to do.
+
+   Nothing here computes on a schedule. A node runs when someone reads
+   it and its parents have moved since it last looked; a node nobody
+   reads never runs at all.
+
+   ## watch
+
+   `Var.watch` is where a graph starts: a node whose value is a var's
+   current value. Writing the var and reading the node again yields the
+   new value. *)
+
 let%expect_test "watch reflects the var's current value" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   let n = Cache.Var.watch v in
   require_equal (module Int) (Cache.Node.value n) 1;
   Cache.Var.set v 2;
   require_equal (module Int) (Cache.Node.value n) 2;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## A unit var used as a signal
+
+   A watch node carries the default `phys_equal` cutoff like any other,
+   and that has a consequence worth knowing before it surprises someone:
+   a var whose type has essentially one value never *looks* changed. A
+   `unit Var.t` used as a "something happened" signal is the case in
+   point --- `()` is physically equal to itself, so every write is
+   absorbed and nothing downstream ever fires.
+
+   Note which node the cutoff has to be disabled on: `watch` builds a
+   fresh node per call, so the node passed to `map` is the one that must
+   be kept and set, not a second `watch` of the same var. *)
+
 let%expect_test "a unit Var used as a pure signal needs its cutoff disabled" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let signal = Cache.Var.create cache () in
   (* [watch] builds a fresh node each call, so this one has to be kept and
@@ -30,18 +68,38 @@ let%expect_test "a unit Var used as a pure signal needs its cutoff disabled" =
       !calls)
   in
   require_equal (module Int) (Cache.Node.value n) 1;
-  (* [unit] is [phys_equal] to itself always, so the default cutoff on
-     [signal_node] swallows this [set]: [n] never recomputes. *)
+  (* @mdexp
+
+     `()` is `phys_equal` to itself, always, so the default cutoff on the
+     watch node swallows this write and `n` never recomputes: *)
+  (* @mdexp.code *)
   Cache.Var.set signal ();
   require_equal (module Int) (Cache.Node.value n) 1;
-  (* Disabling [signal_node]'s cutoff makes every [set] count. *)
+  (* @mdexp
+
+     Disabling that cutoff makes every write count: *)
+  (* @mdexp.code *)
   Cache.Node.set_cutoff signal_node ~equal:(fun () () -> false);
   Cache.Var.set signal ();
   require_equal (module Int) (Cache.Node.value n) 2;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## map
+
+   `map` runs `f` on demand, and only when its parent has actually moved.
+   Reading twice with no write in between runs `f` once.
+
+   This is the shape most of the tests in this book take: a counter
+   incremented inside `f`, and a check that pins the value and the number
+   of times `f` has run together, so that "it did not recompute" is
+   asserted rather than assumed. *)
+
 let%expect_test "map only recomputes when the parent's stamp moved" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   let calls = ref 0 in
@@ -58,10 +116,19 @@ let%expect_test "map only recomputes when the parent's stamp moved" =
   check ~value:10 ~calls:1;
   Cache.Var.set v 2;
   check ~value:20 ~calls:2;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   Writes are targeted rather than global: a write to some other var in
+   the same cache advances the shared clock, but does not make this node
+   stale. Staleness is decided against the parents a node actually has,
+   not against the clock. *)
+
 let%expect_test "an unrelated var's write doesn't force a recompute" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   let unrelated = Cache.Var.create cache "x" in
@@ -75,14 +142,33 @@ let%expect_test "an unrelated var's write doesn't force a recompute" =
   Cache.Var.set unrelated "y";
   require_equal (module Int) (Cache.Node.value n) 10;
   require_equal (module Int) !calls 1;
+  (* @mdexp.end *)
   ()
 ;;
 
-(* [map2]/[map3] and the rest of the [mapN] family get their own,
-   systematic, per-component coverage in [test__mapn.ml] rather than a
-   one-off case each here — see that file's header. *)
+(* @mdexp
+
+   `map2`, `map3` and the rest of the family get systematic,
+   per-component coverage of their own rather than one case each here:
+   see [The mapN family](test__mapn.md). *)
+
+(* @mdexp
+
+   ## Cutoff
+
+   A cutoff decides when a recompute counts as a *change*. When the value
+   a node has just produced is `equal` to the one it was already holding,
+   its stamp stays put and nothing built on it recomputes --- the node
+   itself still ran, since running is how it found out.
+
+   That distinction is the whole point: work is stopped at the first node
+   where the value stopped moving, rather than at the first node where
+   the inputs stopped moving. Below, a node reduces an integer to its
+   parity --- many different integers share one --- and a downstream node
+   counts how often it runs: *)
 
 let%expect_test "cutoff stops a downstream recompute when the value didn't really change" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 5 in
   (* Many different [v] map to the same parity: [set_cutoff Int.equal]
@@ -97,22 +183,42 @@ let%expect_test "cutoff stops a downstream recompute when the value didn't reall
   in
   ignore (Cache.Node.value downstream : int);
   require_equal (module Int) !downstream_calls 1;
-  (* 5 -> 7 is still odd: [mid] re-fires its own closure (it has to, to
-     find out), but its cutoff absorbs the result, so [downstream] never
-     even considers recomputing. *)
+  (* @mdexp
+
+     5 to 7 is still odd. The parity node re-fires its own closure --- it
+     has to, to find out --- but its cutoff absorbs the result, so
+     `downstream` never even considers recomputing: *)
+  (* @mdexp.code *)
   Cache.Var.set v 7;
   ignore (Cache.Node.value downstream : int);
   require_equal (module Int) !downstream_calls 1;
-  (* 7 -> 8 flips parity: now [mid]'s cutoff lets it through. *)
+  (* @mdexp
+
+     7 to 8 flips the parity, and now the cutoff lets it through: *)
+  (* @mdexp.code *)
   Cache.Var.set v 8;
   require_equal (module Int) (Cache.Node.value downstream) 0;
   require_equal (module Int) !downstream_calls 2;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ### both, and what the default cutoff can absorb
+
+   A pair node is not special: it recomputes when a component moves, and
+   its own cutoff then decides whether that counts. What is worth showing
+   is where the *default* cutoff runs out.
+
+   Two pairs over the same two vars, one left with the default cutoff
+   and one given a structural `equal`, each with a reader counting how
+   often it runs: *)
+
 let%expect_test
-    "both's default cutoff rarely fires (fresh pair every time); set_cutoff does"
+    "both: the default cutoff can't absorb a re-allocated pair, an explicit equal can"
   =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache "x" in
   let b = Cache.Var.create cache "y" in
@@ -135,26 +241,226 @@ let%expect_test
   in
   ignore (Cache.Node.value downstream_default : string * string);
   ignore (Cache.Node.value downstream_custom : string * string);
-  (* A freshly-allocated string with the same content: [a]'s own watch
-     node isn't [phys_equal]-cut-off (it's a different block), so both
-     variants of [both] see it as stale and recompute the pair — but the
-     pair's *content* hasn't actually changed. *)
+  (* @mdexp
+
+     Now a freshly allocated string of the same content. `a`'s own watch
+     node cannot cut it off --- a different block is a different block ---
+     so both pairs recompute, even though neither pair's *content* has
+     changed: *)
+  (* @mdexp.code *)
   Cache.Var.set a (Bytes.to_string (Bytes.of_string "x"));
   ignore (Cache.Node.value downstream_default : string * string);
   ignore (Cache.Node.value downstream_custom : string * string);
+  (* @mdexp
+
+     The difference is what each pair's cutoff does with that recompute.
+     `phys_equal` cannot absorb the fresh tuple, so the default pair reports
+     a change and its reader runs a second time; the structural `equal`
+     absorbs it, and its reader does not: *)
+  (* @mdexp.code *)
   require_equal (module Int) !default_calls 2;
   require_equal (module Int) !custom_calls 1;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   None of which is particular to pairing. Any `f` that allocates its
+   result is in the same position, which is exactly when
+   `Node.set_cutoff` is worth reaching for. *)
+
+(* @mdexp
+
+   ### The first computation always counts as a change
+
+   A cutoff compares a fresh value against the previously cached one, and
+   on the first computation there is no previous one. So the first
+   computation counts as a change however permissive the cutoff is ---
+   even under the `equal` the test installs, which claims nothing ever
+   changes.
+
+   Pinning that down takes some care. What has to be shown is that the
+   node moved off the stamp it was *built* with and that its `f` really
+   ran; not that its stamp differs from zero, which would still read as
+   passing under a clock that never started there. So the clock is
+   deliberately advanced by an unrelated write before the node exists,
+   the node records in a ref that it ran, and every assertion is about
+   the node's own trajectory from its construction onward. *)
+let%expect_test "cutoff: the first computation always counts as a change" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let clock = Cache.Private.clock cache in
+  let v = Cache.Var.create cache 1 in
+  (* Somebody else's write, before [n] is built. *)
+  let unrelated = Cache.Var.create cache "x" in
+  Cache.Var.set unrelated "y";
+  let built_at = Cache.Private.Clock.now clock in
+  let fired = ref false in
+  let n =
+    Cache.Node.map (Cache.Var.watch v) ~f:(fun x ->
+      fired := true;
+      x)
+  in
+  (* A cutoff that claims nothing ever changes. *)
+  Cache.Node.set_cutoff n ~equal:(fun _ _ -> true);
+  Cache.Var.set v 2;
+  let after_write = Cache.Private.Clock.now clock in
+  require_equal (module Bool) (Cache.Private.Clock.Stamp.equal built_at after_write) false;
+  (* @mdexp
+
+     Forcing it: the closure runs, and the stamp becomes a reading `n`
+     cannot have been carrying before, since it postdates `n`'s
+     construction. *)
+  (* @mdexp.code *)
+  let first = Cache.Private.node_stamp n in
+  require_equal (module Bool) !fired true;
+  require_equal (module Cache.Private.Clock.Stamp) first after_write;
+  (* @mdexp
+
+     Every computation after that one is absorbed. The closure still fires
+     and the clock still moves; the stamp is what stays put: *)
+  (* @mdexp.code *)
+  fired := false;
+  Cache.Var.set v 3;
+  let second = Cache.Private.node_stamp n in
+  require_equal (module Bool) !fired true;
+  require_equal (module Cache.Private.Clock.Stamp) second first;
+  require_equal
+    (module Bool)
+    (Cache.Private.Clock.Stamp.equal second (Cache.Private.Clock.now clock))
+    false;
+  (* @mdexp.end *)
+  ()
+;;
+
+(* @mdexp
+
+   ### phys_equal earns its keep on ordinary code
+
+   The default is worth having rather than merely tolerating. An `f` that
+   hands back one of its own arguments --- a projection, a lookup, a
+   value passed straight through --- returns the very same block whenever
+   that argument did not move, so the cutoff fires with no `equal`
+   written by anybody. Below, a projection over two parents, with a sink
+   reading it: *)
+let%expect_test "cutoff: an f returning one of its arguments cuts off for free" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let a = Cache.Var.create cache (ref 1) in
+  let b = Cache.Var.create cache (ref 2) in
+  let projections = ref 0 in
+  let proj =
+    Cache.Node.map2 (Cache.Var.watch a) (Cache.Var.watch b) ~f:(fun x _y ->
+      incr projections;
+      x)
+  in
+  let sinks = ref 0 in
+  let sink =
+    Cache.Node.map proj ~f:(fun r ->
+      incr sinks;
+      !r)
+  in
+  require_equal (module Int) (Cache.Node.value sink) 1;
+  require_equal (module Int) !projections 1;
+  require_equal (module Int) !sinks 1;
+  (* @mdexp
+
+     `b` moves, so the projection re-fires --- and hands back the very same
+     `a` it had. `phys_equal` sees that, and the sink does not run: *)
+  (* @mdexp.code *)
+  Cache.Var.set b (ref 22);
+  require_equal (module Int) (Cache.Node.value sink) 1;
+  require_equal (module Int) !projections 2;
+  require_equal (module Int) !sinks 1;
+  (* @mdexp
+
+     `a` moves: a real change, all the way down: *)
+  (* @mdexp.code *)
+  Cache.Var.set a (ref 11);
+  require_equal (module Int) (Cache.Node.value sink) 11;
+  require_equal (module Int) !projections 3;
+  require_equal (module Int) !sinks 2;
+  (* @mdexp.end *)
+  ()
+;;
+
+(* @mdexp
+
+   ### Sharing a node shares its cutoff
+
+   A cutoff is state on a node rather than on whatever reads it. Several
+   readers can share one node --- the node a single `Var.watch` call
+   returned, kept and passed around --- and when they do, they share its
+   cached value and its cutoff along with it. There is no per-reader
+   view: one cutoff, and it decides what all of them see. *)
+let%expect_test "cutoff: sharing a watch node shares its cutoff" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let v = Cache.Var.create cache 1 in
+  let shared = Cache.Var.watch v in
+  (* A cutoff that lets nothing through. *)
+  Cache.Node.set_cutoff shared ~equal:(fun _ _ -> true);
+  let calls_1 = ref 0 in
+  let n1 =
+    Cache.Node.map shared ~f:(fun x ->
+      incr calls_1;
+      x)
+  in
+  let calls_2 = ref 0 in
+  let n2 =
+    Cache.Node.map shared ~f:(fun x ->
+      incr calls_2;
+      x)
+  in
+  require_equal (module Int) (Cache.Node.value n1) 1;
+  require_equal (module Int) (Cache.Node.value n2) 1;
+  require_equal (module Int) !calls_1 1;
+  require_equal (module Int) !calls_2 1;
+  (* @mdexp
+
+     The var is written, and neither reader hears about it. The second one
+     never asked for that cutoff; it reads the node the cutoff is on, which
+     is the whole of what determines what it sees: *)
+  (* @mdexp.code *)
+  Cache.Var.set v 42;
+  require_equal (module Int) (Cache.Node.value n1) 1;
+  require_equal (module Int) (Cache.Node.value n2) 1;
+  require_equal (module Int) !calls_1 1;
+  require_equal (module Int) !calls_2 1;
+  (* @mdexp.end *)
+  ()
+;;
+
+(* @mdexp
+
+   ## const
+
+   A node holding a value that never changes. It has no parent, so
+   nothing can ever make it stale. *)
+
 let%expect_test "const is a constant, never recomputed" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let n = Cache.Node.const cache 42 in
   require_equal (module Int) (Cache.Node.value n) 42;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## Syntax
+
+   `let+` and `and+` are `map` and `both` under applicative syntax, for
+   combining more nodes than the `mapN` family covers. There is no `let*`
+   --- the graph's shape is fixed where it is written, which is the
+   trade this library makes.
+
+   Over two vars holding 1 and 2: *)
+
 let%expect_test "Syntax: let+/and+ over map/both" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache 1 in
   let b = Cache.Var.create cache 2 in
@@ -165,45 +471,83 @@ let%expect_test "Syntax: let+/and+ over map/both" =
     a + b
   in
   require_equal (module Int) (Cache.Node.value n) 3;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## Recomputing reads the clock, it does not tick it
+
+   Only a write advances the clock. A node that recomputes stamps itself
+   with the clock's *current* reading rather than minting a fresh one.
+
+   That is what makes stamp comparison meaningful across the graph: a
+   reading identifies the write that caused a change, not the order in
+   which somebody happened to pull the nodes afterwards. *)
+
 let%expect_test "recomputing reads the cache, it doesn't tick it: siblings share a stamp" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   Cache.Var.set v 2;
-  (* Two independent nodes, both forced for the first time after the
-     same single write: each stamps itself with the cache's current
-     reading, not a freshly-minted one, so they end up sharing it rather
-     than each consuming its own tick. *)
+  (* @mdexp
+
+     Two independent nodes, both forced for the first time after that one
+     write. Each stamps itself with the clock's current reading rather than
+     minting one, so they end up sharing it instead of consuming a tick
+     each: *)
+  (* @mdexp.code *)
   let n1 = Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x * 10) in
   let n2 = Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x * 100) in
   ignore (Cache.Node.value n1 : int);
   ignore (Cache.Node.value n2 : int);
   require_equal
     (module Bool)
-    (Cache.Clock.Stamp.equal (Cache.Node.stamp n1) (Cache.Node.stamp n2))
+    (Cache.Private.Clock.Stamp.equal
+       (Cache.Private.node_stamp n1)
+       (Cache.Private.node_stamp n2))
     true;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## watch builds a fresh node every call
+
+   Two `Var.watch` calls on the same var are two independent nodes, each
+   with its own cached value and its own cutoff. Nothing memoizes one
+   node per var. Sharing is the caller's business: keep whichever call's
+   result and reuse it. *)
+
 let%expect_test "watch builds a fresh node every call; share one by reusing it" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
-  (* Two separate [watch] calls are two independent nodes — sharing one
-     (its cache, its cutoff) is on the caller: keep and reuse whichever
-     call's result instead of calling [watch] again. *)
   require_equal (module Bool) (phys_equal (Cache.Var.watch v) (Cache.Var.watch v)) false;
   let shared = Cache.Var.watch v in
   require_equal (module Bool) (phys_equal shared shared) true;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ## Combining across caches is an error
+
+   Stamps are only comparable within one clock, so a node combining
+   parents from two different caches could not decide staleness at all.
+   Rather than produce a node that quietly gets it wrong, `both` raises
+   `Invalid_argument` at construction time. *)
+
 let%expect_test "both raises when the two nodes don't share a cache" =
+  (* @mdexp.code *)
   let a = Cache.Var.watch (Cache.Var.create (Cache.create ()) 1) in
   let b = Cache.Var.watch (Cache.Var.create (Cache.create ()) 2) in
   require_does_raise (fun () : (int * int) Cache.Node.t -> Cache.Node.both a b);
   [%expect {| Invalid_argument("Cache.Node: nodes were not built from the same clock") |}];
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -222,7 +566,29 @@ end
 
 let keys_of li = Set.of_list (module Int_key) li
 
+(* @mdexp
+
+   ## collect
+
+   `collect` is the one combinator whose parents are not fixed where it
+   is written. Given a node holding a set of keys and a function `f` from
+   key to node, it produces a node holding a map from key to value,
+   tracking however many children the key set currently calls for.
+
+   `f` is called the first time a key is seen and the resulting child is
+   memoized, so a key that stays put is not rebuilt on every look. A key
+   that leaves is dropped from the memo table and disconnected; if it
+   later comes back, `f` mints a *fresh* child for it rather than
+   resurrecting the old one --- which is what a caller wants when a key
+   reappearing means the thing behind it was recreated, a deleted file
+   written again under the same name being the motivating case.
+
+   The test walks that whole life cycle. `f` mints one var per key,
+   seeded to ten times the key, and `creates` counts how many times it
+   was called: *)
+
 let%expect_test "collect: a dynamic, keyed collection of nodes" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let keys = Cache.Var.create cache (keys_of [ 1; 2; 3 ]) in
   (* One [Cache.Var.t] per key, minted by [f] the first time [collect]
@@ -249,40 +615,66 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   print ();
   [%expect {| [1=10; 2=20; 3=30] |}];
   require_equal (module Int) !creates 3;
-  (* Reading again without any write doesn't re-mint any child. *)
+  (* @mdexp
+
+     Reading again without any write re-mints nothing: *)
+  (* @mdexp.code *)
   print ();
   [%expect {| [1=10; 2=20; 3=30] |}];
   require_equal (module Int) !creates 3;
-  (* Changing one existing child's own var — [keys] never moves — is
-     picked up without minting anything new: the whole point of
-     [collect] over the coarse "watch one global signal" alternative. *)
+  (* @mdexp
+
+     Changing one existing child's own var --- `keys` never moves --- is
+     picked up without minting anything new. This is the whole point of
+     `collect` over the coarse "watch one global signal" alternative: *)
+  (* @mdexp.code *)
   Cache.Var.set (Hashtbl.find_exn child_vars 2) 99;
   print ();
   [%expect {| [1=10; 2=99; 3=30] |}];
   require_equal (module Int) !creates 3;
-  (* Adding a key mints exactly one new child; the existing two aren't
-     re-minted (same [Cache.Var.t]s, same values). *)
+  (* @mdexp
+
+     Adding a key mints exactly one new child. The existing three are not
+     re-minted --- same vars, same values, and `creates` goes to 4 rather
+     than 7: *)
+  (* @mdexp.code *)
   Cache.Var.set keys (keys_of [ 1; 2; 3; 4 ]);
   print ();
   [%expect {| [1=10; 2=99; 3=30; 4=40] |}];
   require_equal (module Int) !creates 4;
-  (* Removing a key drops it from both the result and the memoization
-     table. *)
+  (* @mdexp
+
+     Removing a key drops it from the result, and from the memo table
+     behind it: *)
+  (* @mdexp.code *)
   Cache.Var.set keys (keys_of [ 1; 3; 4 ]);
   print ();
   [%expect {| [1=10; 3=30; 4=40] |}];
   require_equal (module Int) !creates 4;
-  (* A key that reappears after being dropped gets a fresh child via
-     [f] rather than resurrecting the old one (its value starts back at
-     [k * 10], not the [99] the old child for key 2 was mutated to). *)
+  (* @mdexp
+
+     And a key that comes back gets a fresh child from `f` rather than the
+     old one resurrected. Key 2 returns holding 20, not the 99 the previous
+     child for that key had been mutated to: *)
+  (* @mdexp.code *)
   Cache.Var.set keys (keys_of [ 1; 2; 3; 4 ]);
   print ();
   [%expect {| [1=10; 2=20; 3=30; 4=40] |}];
   require_equal (module Int) !creates 5;
+  (* @mdexp.end *)
   ()
 ;;
 
+(* @mdexp
+
+   ### Unrelated writes leave it alone
+
+   The dynamic parent set does not make `collect` promiscuous: a write to
+   a var it never collected neither re-mints a child nor recomputes
+   anything downstream. *)
+
 let%expect_test "collect: an unrelated var's write doesn't force a recompute" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let keys = Cache.Var.create cache (keys_of [ 1 ]) in
   let unrelated = Cache.Var.create cache "x" in
@@ -306,17 +698,136 @@ let%expect_test "collect: an unrelated var's write doesn't force a recompute" =
   ignore (Cache.Node.value node : (int, int, Int_key.comparator_witness) Map.t);
   require_equal (module Int) !creates 1;
   require_equal (module Int) !recomputes 1;
+  (* @mdexp.end *)
   ()
 ;;
 
-(* A long chain, pulled only part-way between writes. This is the shape
-   the eager marking pass's short-circuit rests on: it stops at a node
-   already marked, on the strength of "already marked" implying "its
-   children were already cut, and everything below it is marked too".
-   That invariant is only interesting once a chain is deep enough to sit
-   half-resolved and half-marked at the same time, which the two- and
-   three-level tests above can't express. *)
+(* @mdexp
+
+   ### A re-fold that changes nothing yields the same map
+
+   The interface claims that a key whose child did not change keeps the
+   binding it already had, physically unchanged. That rests on `collect`
+   folding its result *onto the previous map* rather than rebuilding one
+   from empty: an unchanged key is re-added the value already bound to
+   it, and adding a binding a map already holds returns that same map
+   rather than a copy of it.
+
+   Followed through, a re-fold in which nothing moved produces the
+   physically same map, which `collect`'s own default cutoff then
+   absorbs --- so nothing downstream runs at all.
+
+   Getting `collect` to re-fold in the first place takes a nudge: the
+   test writes a freshly allocated set of equal contents, which the
+   `keys` watch node has no cutoff to absorb, so `collect` is genuinely
+   asked to look again. It looks, and finds nothing has changed. *)
+let%expect_test "collect: a re-fold that changes nothing yields the same map" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let keys = Cache.Var.create cache (keys_of [ 1; 2 ]) in
+  let node =
+    Cache.Node.collect
+      (module Int_key)
+      ~keys:(Cache.Var.watch keys)
+      ~f:(fun k -> Cache.Node.const cache (k * 10))
+  in
+  let downstream = ref 0 in
+  let sink =
+    Cache.Node.map node ~f:(fun map ->
+      incr downstream;
+      Map.cardinal map)
+  in
+  require_equal (module Int) (Cache.Node.value sink) 2;
+  require_equal (module Int) !downstream 1;
+  Cache.Var.set keys (keys_of [ 1; 2 ]);
+  require_equal (module Int) (Cache.Node.value sink) 2;
+  require_equal (module Int) !downstream 1;
+  (* @mdexp
+
+     Same elements, built in a different order --- still the same set, so
+     still the same map: *)
+  (* @mdexp.code *)
+  Cache.Var.set keys (keys_of [ 2; 1 ]);
+  require_equal (module Int) (Cache.Node.value sink) 2;
+  require_equal (module Int) !downstream 1;
+  (* @mdexp.end *)
+  ()
+;;
+
+(* @mdexp
+
+   ### Reading one key cuts off when a different key changes
+
+   That preserved binding is what makes reading a single key out of a
+   collection worthwhile. Below, a node extracts key 1 out of the
+   collection, and a sink reads that: *)
+let%expect_test "collect: reading one key cuts off when a different key changes" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let keys = Cache.Var.create cache (keys_of [ 1; 2 ]) in
+  let child_vars : (int, int ref Cache.Var.t) Hashtbl.t =
+    Hashtbl.create (module Int_key) 16
+  in
+  let f k =
+    let v = Cache.Var.create cache (ref (k * 10)) in
+    Hashtbl.set child_vars ~key:k ~data:v;
+    Cache.Var.watch v
+  in
+  let node = Cache.Node.collect (module Int_key) ~keys:(Cache.Var.watch keys) ~f in
+  let extracts = ref 0 in
+  let one =
+    Cache.Node.map node ~f:(fun map ->
+      incr extracts;
+      Map.find_exn map 1)
+  in
+  let sinks = ref 0 in
+  let sink =
+    Cache.Node.map one ~f:(fun r ->
+      incr sinks;
+      !r)
+  in
+  require_equal (module Int) (Cache.Node.value sink) 10;
+  require_equal (module Int) !extracts 1;
+  require_equal (module Int) !sinks 1;
+  (* @mdexp
+
+     Key 2 moves. The extracting node has to look again --- the map is a
+     new one --- and finds key 1 exactly as it left it, so its own cutoff
+     stops the change there: *)
+  (* @mdexp.code *)
+  Cache.Var.set (Hashtbl.find_exn child_vars 2) (ref 999);
+  require_equal (module Int) (Cache.Node.value sink) 10;
+  require_equal (module Int) !extracts 2;
+  require_equal (module Int) !sinks 1;
+  (* @mdexp
+
+     Key 1 moves: this one has to reach the sink: *)
+  (* @mdexp.code *)
+  Cache.Var.set (Hashtbl.find_exn child_vars 1) (ref 111);
+  require_equal (module Int) (Cache.Node.value sink) 111;
+  require_equal (module Int) !extracts 3;
+  require_equal (module Int) !sinks 2;
+  (* @mdexp.end *)
+  ()
+;;
+
+(* @mdexp
+
+   ## Deep chains, pulled part-way
+
+   Writing is meant to be cheap, and it is kept cheap by a short-circuit:
+   the marking pass stops as soon as it reaches a node that is already
+   marked, on the strength of "already marked" implying "everything below
+   it is marked too, and its edges were already cut". Get that wrong and
+   a node stays stale-but-unmarked, serving an out-of-date value forever
+   --- the one failure mode this design has that a full recompute does
+   not.
+
+   The invariant only becomes interesting once a chain is deep enough to
+   sit half-resolved and half-marked at the same time, which no two- or
+   three-node test can express. So, a chain of fifty: *)
 let%expect_test "deep chain: partial pulls between writes" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let depth = 50 in
   let v = Cache.Var.create cache 0 in
@@ -326,22 +837,35 @@ let%expect_test "deep chain: partial pulls between writes" =
   done;
   let top = nodes.(depth) in
   require_equal (module Int) (Cache.Node.value top) depth;
-  (* Write, then resolve only the bottom half of the chain: the top half
-     stays marked and disconnected while the bottom half is live again. *)
+  (* @mdexp
+
+     Write, then pull only the bottom half. The chain is now live up to the
+     midpoint and marked above it --- the state no shallow test can
+     reach: *)
+  (* @mdexp.code *)
   Cache.Var.set v 10;
   require_equal (module Int) (Cache.Node.value nodes.(depth / 2)) (10 + (depth / 2));
-  (* A second write now cascades into a chain that is resolved up to the
-     halfway point and already marked past it — where it stops. The
-     nodes it didn't reach are the ones that were already marked, and
-     they must still recompute when finally pulled. *)
+  (* @mdexp
+
+     A second write cascades into exactly that mixed chain, and stops where
+     it meets the marks. The nodes it never reached are the already-marked
+     ones, and they must still recompute when the top is finally pulled: *)
+  (* @mdexp.code *)
   Cache.Var.set v 100;
   require_equal (module Int) (Cache.Node.value top) (100 + depth);
-  (* And once everything is resolved again, an ordinary write still
-     travels the whole depth. *)
+  (* @mdexp
+
+     Everything is resolved again, and an ordinary write still travels the
+     whole depth: *)
+  (* @mdexp.code *)
   Cache.Var.set v 1000;
   require_equal (module Int) (Cache.Node.value top) (1000 + depth);
-  (* Pulling from the middle after that changes nothing anywhere. *)
+  (* @mdexp
+
+     Pulling from the middle afterwards changes nothing anywhere: *)
+  (* @mdexp.code *)
   require_equal (module Int) (Cache.Node.value nodes.(depth / 2)) (1000 + (depth / 2));
   require_equal (module Int) (Cache.Node.value top) (1000 + depth);
+  (* @mdexp.end *)
   ()
 ;;

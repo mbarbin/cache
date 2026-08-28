@@ -55,40 +55,6 @@ type cache := t
 (** A fresh, empty cache. *)
 val create : unit -> t
 
-module Clock : sig
-  (** The logical clock shared by every var and node of one cache.
-
-      Most code never needs this module: it is here because comparing
-      stamps is occasionally useful — {!Node.stamp} says when a node's
-      value last changed. *)
-
-  type t
-
-  (** A reading of the clock: a var's or node's "as of" version. Abstract
-      so it can't be mistaken for an unrelated [int]. *)
-  module Stamp : sig
-    type t
-
-    (** Where every var and node starts, before its first write or
-        computation. *)
-    val zero : t
-
-    val equal : t -> t -> bool
-
-    (** [a > b] — [a] is a later reading than [b]. *)
-    val ( > ) : t -> t -> bool
-
-    val to_dyn : t -> Dyn.t
-  end
-
-  (** The current reading. Does not advance the clock. *)
-  val now : t -> Stamp.t
-
-  (** Advances the clock by one and returns the new reading. Within the
-      library only {!Var.set} and {!Computation.invalidate} call this. *)
-  val tick : t -> Stamp.t
-end
-
 module Node : sig
   (** A memoized computation over vars and other nodes.
 
@@ -103,10 +69,6 @@ module Node : sig
   (** Forces the node: recomputes if an input has changed since the last
       look, otherwise returns the cached value. *)
   val value : 'a t -> 'a
-
-  (** When this node's value last changed, as judged by its
-      {!set_cutoff}. Forces the node, exactly as {!value} does. *)
-  val stamp : _ t -> Clock.Stamp.t
 
   (** A node that never changes; [v] is never recomputed. [cache] only
       says which world it belongs to. *)
@@ -164,8 +126,8 @@ module Node : sig
 
   (** [set_cutoff t ~equal] decides when a recompute of [t] counts as a
       change for the nodes built from [t]: once a recompute produces a
-      value [equal] to the one cached, [t]'s {!stamp} stays put and
-      nothing downstream recomputes. The first computation always counts
+      value [equal] to the one cached, [t] does not count as having
+      changed and nothing downstream recomputes. The first computation always counts
       as a change, there being no earlier value to compare it against.
 
       The default, [phys_equal], already suits ordinary functional code:
@@ -175,21 +137,13 @@ module Node : sig
       conceptually the same thing — a record rebuilt field by field, or a
       value arriving freshly parsed from somewhere each time.
 
-      Two things worth knowing. The default never fires on {!both} (nor
-      on {!Syntax}'s [and+]): the pair is allocated afresh on every
-      recompute, so it always reports a change, and any cutting off has
-      to happen on the nodes either side of it. And a cutoff set on the
-      node {!Var.watch} returned applies to every reader sharing that
-      node, not only the caller that set it.
-
       A mutation rather than a constructor: it returns [unit], so it
       never reads as though it had built a new node. *)
   val set_cutoff : 'a t -> equal:('a -> 'a -> bool) -> unit
 
   module Syntax : sig
     (** [let+]/[and+] over {!map}/{!both}, for the arities
-        {!map2}/{!map3} don't cover. [and+] builds a {!both}, whose
-        default cutoff never fires — see {!set_cutoff}. *)
+        {!map2}/{!map3} don't cover. *)
 
     val return : cache -> 'a -> 'a t
     val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
@@ -246,9 +200,6 @@ module Var : sig
       this page. *)
   val set : 'a t -> 'a -> unit
 
-  (** When [t] was last {!set}, or {!Clock.Stamp.zero} if it never was. *)
-  val stamp : _ t -> Clock.Stamp.t
-
   (** A node reading [t]'s current value.
 
       Every call builds a {b fresh} node. To share one between several
@@ -263,5 +214,52 @@ module Var : sig
   val watch : 'a t -> 'a Node.t
 end
 
-(** The clock this cache shares — see {!Clock}. *)
-val clock : t -> Clock.t
+(** Not part of the API. The logical clock, and the two stamp
+    accessors, are the library's own bookkeeping: nothing in a caller's
+    code has to consult them, and nothing inside the library consults a
+    var's stamp at all — a node learns it is stale from being told, not
+    from comparing readings. They are exposed here for this repository's
+    own tests, which do need to observe when something moved. *)
+module Private : sig
+  (** The logical clock shared by every var and node of one cache. *)
+  module Clock : sig
+    type t
+
+    (** A reading of the clock: a var's or node's "as of" version.
+        Abstract so it can't be mistaken for an unrelated [int]. *)
+    module Stamp : sig
+      type t
+
+      (** Where every var and node starts, before its first write or
+          computation. *)
+      val zero : t
+
+      val equal : t -> t -> bool
+
+      (** [a > b] — [a] is a later reading than [b]. *)
+      val ( > ) : t -> t -> bool
+
+      val to_dyn : t -> Dyn.t
+    end
+
+    (** The current reading. Does not advance the clock. *)
+    val now : t -> Stamp.t
+
+    (** Advances the clock by one and returns the new reading. Within the
+        library only {!Var.set} and {!Computation.invalidate} call this. *)
+    val tick : t -> Stamp.t
+  end
+
+  (** The clock [t] shares. *)
+  val clock : t -> Clock.t
+
+  (** When the node's value last changed, as judged by its
+      {!Node.set_cutoff}. Forces the node, exactly as {!Node.value}
+      does. *)
+  val node_stamp : _ Node.t -> Clock.Stamp.t
+
+  (** When the var was last {!Var.set}, or {!Clock.Stamp.zero} if it
+      never was. Read by nothing in the library: a var's stamp exists to
+      be observed, not to drive recomputation. *)
+  val var_stamp : _ Var.t -> Clock.Stamp.t
+end

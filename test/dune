@@ -1,3 +1,5 @@
+(data_only_dirs book)
+
 (library
  (name cache_test)
  (package pulicomv-tests)
@@ -23,3 +25,122 @@
   (pps ppx_js_style -allow-let-operators -check-doc-comments))
  (preprocess
   (pps ppx_expect)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target test__cache.md.gen)
+ (deps test__cache.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff test__cache.md test__cache.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target test__var.md.gen)
+ (deps test__var.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff test__var.md test__var.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target test__node.md.gen)
+ (deps test__node.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff test__node.md test__node.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target test__mapn.md.gen)
+ (deps test__mapn.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff test__mapn.md test__mapn.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target test__computation.md.gen)
+ (deps test__computation.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff test__computation.md test__computation.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target test__import.md.gen)
+ (deps test__import.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff test__import.md test__import.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target invalid_uses.md.gen)
+ (deps invalid_uses.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff invalid_uses.md invalid_uses.md.gen)))

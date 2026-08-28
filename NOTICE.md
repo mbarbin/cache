@@ -12,6 +12,23 @@ This notice file contains more details, as well as document the organization of 
 
 - **NOTICE.md** (this file) documents the project licensing.
 
+## A note about highlight.js
+
+`doc/book/shared-theme/highlight.js` is a vendored build of
+[highlight.js](https://github.com/highlightjs/highlight.js) `v11.9.0`, released
+under `BSD-3-Clause`. It is a custom build including the OCaml grammar, which
+the stock mdbook bundle does not carry; it overrides mdbook's own copy so that
+the OCaml in the test book is syntax-highlighted.
+
+It is a development-time asset only --- no part of it is linked into, or
+distributed with, the `pulicomv` library.
+
+### Notice
+
+highlight.js's original LICENSE is included in this repo at
+`third-party-license/highlightjs/LICENSE`, and its copyright and license
+notice is retained in the header of the vendored file itself.
+
 ## A note about Incremental
 
 pulicomv borrows ideas and terminology from Jane Street's [incremental](https://github.com/janestreet/incremental) project, which is released under `MIT`. We're referring to `incremental` as of version `v0.17.0`.
