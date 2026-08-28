@@ -109,9 +109,7 @@ Other OCaml takes on incremental and reactive computation:
   incremental computation over a graph of cells.
 - [lwd](https://github.com/let-def/lwd) -- the nearest neighbour of
   this design: vars, applicative combinators, invalidation on set,
-  recomputation on demand. It keeps `bind`, computes only under
-  explicit `observe`/`sample` roots that are released by hand, and has
-  no per-node cutoff.
+  recomputation on demand.
 - [react](https://erratique.ch/software/react) and
   [note](https://erratique.ch/software/note) -- declarative events and
   signals.
