@@ -1,0 +1,32 @@
+description: """\
+
+pulicomv provides pull-based, on-demand incremental computation over
+mutable vars: memoized nodes derived from vars via applicative
+combinators, recomputed lazily on read against a shared logical clock,
+with a per-node cutoff. The main module and entry point of the library
+is named [Cache].
+
+It started from a question: what do you end up with if you're ready to
+give up on [bind]? Without it, a node's parents are fixed when it is
+built, and the machinery a self-adjusting-computation engine needs to
+order its recomputations — heights, a priority queue, a scheduler — has
+nothing left to do.
+
+What remains is two passes, neither of them a stabilization. A write
+([Var.set]) marks the nodes downstream of it as possibly stale and
+recomputes nothing; the marking disconnects each node it reaches from
+its parents as it goes, so it only ever walks what has been read back
+since the last write, and a burst of writes with no read in between
+costs essentially nothing after the first. A read ([Node.value]) is
+what checks: it refreshes the node's own parents, reconnecting to them,
+and re-fires its closure only if one of them really moved.
+
+pulicomv borrows ideas and terminology from Jane Street's [incremental],
+which remains the library to reach for when [bind] is what you need.
+See the project's NOTICE.md for details.
+
+[incremental]: https://github.com/janestreet/incremental
+
+"""
+tags: [ "incremental" "cache" "memoization" ]
+x-maintenance-intent: [ "(latest)" ]

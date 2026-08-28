@@ -1,0 +1,33 @@
+(env
+ (dev
+  (odoc
+   (warnings fatal))))
+
+(rule
+ (target README.md.gen)
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{dep:gen_readme.ml}))))
+
+(rule
+ (package pulicomv-dev)
+ (alias runtest)
+ (enabled_if %{bin-available:mdexp})
+ (action
+  (diff README.md README.md.gen)))
+
+(library
+ (name readme)
+ (package pulicomv-dev)
+ (flags :standard -w +a-4-40-41-42-44-45-48-66 -warn-error +a -open Pulicomv)
+ (libraries pulicomv)
+ (inline_tests)
+ (instrumentation
+  (backend bisect_ppx))
+ (lint
+  (pps ppx_js_style -allow-let-operators -check-doc-comments))
+ (preprocess
+  (pps ppx_expect)))
