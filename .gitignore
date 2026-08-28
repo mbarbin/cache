@@ -4,3 +4,4 @@ _coverage
 *.install
 coverage.sh
 dune.lock
+test/book

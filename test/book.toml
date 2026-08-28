@@ -1,0 +1,18 @@
+[book]
+title = "Pulicomv Test Suite"
+authors = ["Mathieu Barbin", "Claude Opus 5", "Claude Sonnet 5"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/mbarbin/cache"
+default-theme = "light"
+preferred-dark-theme = "navy"
+theme = "../doc/book/shared-theme"
+
+[output.html.fold]
+enable = true
+level = 1
