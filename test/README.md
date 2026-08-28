@@ -79,11 +79,13 @@ Link to another chapter by its file name: `[Node](test__node.md)`. Anything
 outside `test/` is outside the book, so link to it by its full URL on GitHub
 rather than by a relative path that only resolves in the source tree.
 
-**Narration must stand on its own.** By default the book shows no code, so a
-paragraph saying "the second call returns the same value" is worthless ---
-say which call, and what makes it the same. Read the generated `.md` on its
-own before committing it; if it only makes sense next to the source, it is
-not finished.
+**Narration must stand on its own.** The reader has the prose and whatever
+the block shows, and nothing else --- not the rest of the file, not the
+interface, not the chapter next door. So a paragraph saying "the second call
+returns the same value" is worthless: say which call, and what makes it the
+same, and name anything the block uses without binding. Read the generated
+`.md` on its own before committing it; if it only makes sense with the source
+open beside it, it is not finished.
 
 **Ordinary comments stay ordinary.** A remark about why the code is written
 the way it is --- an `Sys.opaque_identity` to defeat sharing, a hashtable
