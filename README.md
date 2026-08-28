@@ -141,4 +141,4 @@ package, so that renaming the package stays a local change to the
 
 ## Status
 
-Currently under test and review. Not published.
+Currently under test and review. Not released.
