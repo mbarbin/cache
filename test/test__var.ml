@@ -61,7 +61,6 @@ let%expect_test "create starts at Stamp.zero even after the cache has ticked" =
   let cache = Cache.create () in
   let a = Cache.Var.create cache "a0" in
   Cache.Var.set a "a1";
-  (* @mdexp.end *)
   (* @mdexp
 
      `cache` is now at reading 1. A var created at this point still
@@ -115,7 +114,6 @@ let%expect_test "two vars sharing a cache: only the one written ticks" =
   Cache.Var.set a "a1";
   print_stamp (Cache.Private.var_stamp a);
   [%expect {| 1 |}];
-  (* @mdexp.end *)
   (* @mdexp
 
      `b` keeps its own stamp, and its own value, even though the clock it
@@ -161,7 +159,6 @@ let%expect_test "set raises when called from inside a node's computation" =
     {|
     Invalid_argument("Cache.Var.set: a var cannot be set while a node is being computed")
     |}];
-  (* @mdexp.end *)
   (* @mdexp
 
      The failed refresh leaves nothing wedged. A write from outside still
@@ -196,7 +193,6 @@ let%expect_test "set raises when called from a computation's own f" =
     {|
     Invalid_argument("Cache.Var.set: a var cannot be set while a node is being computed")
     |}];
-  (* @mdexp.end *)
   (* @mdexp
 
      And refused before anything is mutated, not rolled back after the

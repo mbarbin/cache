@@ -68,7 +68,6 @@ let%expect_test "a unit Var used as a pure signal needs its cutoff disabled" =
       !calls)
   in
   require_equal (module Int) (Cache.Node.value n) 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      `()` is `phys_equal` to itself, always, so the default cutoff on the
@@ -76,7 +75,6 @@ let%expect_test "a unit Var used as a pure signal needs its cutoff disabled" =
   (* @mdexp.code *)
   Cache.Var.set signal ();
   require_equal (module Int) (Cache.Node.value n) 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Disabling that cutoff makes every write count: *)
@@ -185,7 +183,6 @@ let%expect_test "cutoff stops a downstream recompute when the value didn't reall
   in
   ignore (Cache.Node.value downstream : int);
   require_equal (module Int) !downstream_calls 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      5 to 7 is still odd. The parity node re-fires its own closure --- it
@@ -195,7 +192,6 @@ let%expect_test "cutoff stops a downstream recompute when the value didn't reall
   Cache.Var.set v 7;
   ignore (Cache.Node.value downstream : int);
   require_equal (module Int) !downstream_calls 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      7 to 8 flips the parity, and now the cutoff lets it through: *)
@@ -245,7 +241,6 @@ let%expect_test
   in
   ignore (Cache.Node.value downstream_default : string * string);
   ignore (Cache.Node.value downstream_custom : string * string);
-  (* @mdexp.end *)
   (* @mdexp
 
      Now a freshly allocated string of the same content. `a`'s own watch
@@ -256,7 +251,6 @@ let%expect_test
   Cache.Var.set a (Bytes.to_string (Bytes.of_string "x"));
   ignore (Cache.Node.value downstream_default : string * string);
   ignore (Cache.Node.value downstream_custom : string * string);
-  (* @mdexp.end *)
   (* @mdexp
 
      The difference is what each pair's cutoff does with that recompute.
@@ -313,7 +307,6 @@ let%expect_test "cutoff: the first computation always counts as a change" =
   Cache.Var.set v 2;
   let after_write = Cache.Private.Clock.now clock in
   require_equal (module Bool) (Cache.Private.Clock.Stamp.equal built_at after_write) false;
-  (* @mdexp.end *)
   (* @mdexp
 
      Forcing it: the closure runs, and the stamp becomes a reading `n`
@@ -323,7 +316,6 @@ let%expect_test "cutoff: the first computation always counts as a change" =
   let first = Cache.Private.node_stamp n in
   require_equal (module Bool) !fired true;
   require_equal (module Cache.Private.Clock.Stamp) first after_write;
-  (* @mdexp.end *)
   (* @mdexp
 
      Every computation after that one is absorbed. The closure still fires
@@ -372,7 +364,6 @@ let%expect_test "cutoff: an f returning one of its arguments cuts off for free" 
   require_equal (module Int) (Cache.Node.value sink) 1;
   require_equal (module Int) !projections 1;
   require_equal (module Int) !sinks 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      `b` moves, so the projection re-fires --- and hands back the very same
@@ -382,7 +373,6 @@ let%expect_test "cutoff: an f returning one of its arguments cuts off for free" 
   require_equal (module Int) (Cache.Node.value sink) 1;
   require_equal (module Int) !projections 2;
   require_equal (module Int) !sinks 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      `a` moves: a real change, all the way down: *)
@@ -427,7 +417,6 @@ let%expect_test "cutoff: sharing a watch node shares its cutoff" =
   require_equal (module Int) (Cache.Node.value n2) 1;
   require_equal (module Int) !calls_1 1;
   require_equal (module Int) !calls_2 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      The var is written, and neither reader hears about it. The second one
@@ -502,7 +491,6 @@ let%expect_test "recomputing reads the cache, it doesn't tick it: siblings share
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   Cache.Var.set v 2;
-  (* @mdexp.end *)
   (* @mdexp
 
      Two independent nodes, both forced for the first time after that one
@@ -627,7 +615,6 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   print ();
   [%expect {| [1=10; 2=20; 3=30] |}];
   require_equal (module Int) !creates 3;
-  (* @mdexp.end *)
   (* @mdexp
 
      Reading again without any write re-mints nothing: *)
@@ -635,7 +622,6 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   print ();
   [%expect {| [1=10; 2=20; 3=30] |}];
   require_equal (module Int) !creates 3;
-  (* @mdexp.end *)
   (* @mdexp
 
      Changing one existing child's own var --- `keys` never moves --- is
@@ -646,7 +632,6 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   print ();
   [%expect {| [1=10; 2=99; 3=30] |}];
   require_equal (module Int) !creates 3;
-  (* @mdexp.end *)
   (* @mdexp
 
      Adding a key mints exactly one new child. The existing three are not
@@ -657,7 +642,6 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   print ();
   [%expect {| [1=10; 2=99; 3=30; 4=40] |}];
   require_equal (module Int) !creates 4;
-  (* @mdexp.end *)
   (* @mdexp
 
      Removing a key drops it from the result, and from the memo table
@@ -667,7 +651,6 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   print ();
   [%expect {| [1=10; 3=30; 4=40] |}];
   require_equal (module Int) !creates 4;
-  (* @mdexp.end *)
   (* @mdexp
 
      And a key that comes back gets a fresh child from `f` rather than the
@@ -759,7 +742,6 @@ let%expect_test "collect: a re-fold that changes nothing yields the same map" =
   Cache.Var.set keys (keys_of [ 1; 2 ]);
   require_equal (module Int) (Cache.Node.value sink) 2;
   require_equal (module Int) !downstream 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Same elements, built in a different order --- still the same set, so
@@ -807,7 +789,6 @@ let%expect_test "collect: reading one key cuts off when a different key changes"
   require_equal (module Int) (Cache.Node.value sink) 10;
   require_equal (module Int) !extracts 1;
   require_equal (module Int) !sinks 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Key 2 moves. The extracting node has to look again --- the map is a
@@ -818,7 +799,6 @@ let%expect_test "collect: reading one key cuts off when a different key changes"
   require_equal (module Int) (Cache.Node.value sink) 10;
   require_equal (module Int) !extracts 2;
   require_equal (module Int) !sinks 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Key 1 moves: this one has to reach the sink: *)
@@ -857,7 +837,6 @@ let%expect_test "deep chain: partial pulls between writes" =
   done;
   let top = nodes.(depth) in
   require_equal (module Int) (Cache.Node.value top) depth;
-  (* @mdexp.end *)
   (* @mdexp
 
      Write, then pull only the bottom half. The chain is now live up to the
@@ -866,7 +845,6 @@ let%expect_test "deep chain: partial pulls between writes" =
   (* @mdexp.code *)
   Cache.Var.set v 10;
   require_equal (module Int) (Cache.Node.value nodes.(depth / 2)) (10 + (depth / 2));
-  (* @mdexp.end *)
   (* @mdexp
 
      A second write cascades into exactly that mixed chain, and stops where
@@ -875,7 +853,6 @@ let%expect_test "deep chain: partial pulls between writes" =
   (* @mdexp.code *)
   Cache.Var.set v 100;
   require_equal (module Int) (Cache.Node.value top) (100 + depth);
-  (* @mdexp.end *)
   (* @mdexp
 
      Everything is resolved again, and an ordinary write still travels the
@@ -883,7 +860,6 @@ let%expect_test "deep chain: partial pulls between writes" =
   (* @mdexp.code *)
   Cache.Var.set v 1000;
   require_equal (module Int) (Cache.Node.value top) (1000 + depth);
-  (* @mdexp.end *)
   (* @mdexp
 
      Pulling from the middle afterwards changes nothing anywhere: *)

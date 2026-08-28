@@ -69,7 +69,6 @@ let%expect_test "map2: each component independently triggers a recompute" =
   check ~value:12 ~calls:2;
   Cache.Var.set b 20;
   check ~value:22 ~calls:3;
-  (* @mdexp.end *)
   (* @mdexp
 
      And it settles: reading again with no write in between does not
@@ -114,7 +113,6 @@ let%expect_test "map3: each component independently triggers a recompute" =
   check ~value:122 ~calls:3;
   Cache.Var.set c 200;
   check ~value:222 ~calls:4;
-  (* @mdexp.end *)
   (* @mdexp
 
      Settling, as before: *)

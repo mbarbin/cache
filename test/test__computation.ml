@@ -46,13 +46,11 @@ let%expect_test "Computation: lazy, only refires after invalidate, not at invali
     require_equal (module Int) !calls expected_calls
   in
   check ~value:1 ~calls:1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Reading again without invalidating recomputes nothing: *)
   (* @mdexp.code *)
   check ~value:1 ~calls:1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Now the state changes twice, with an `invalidate` after each. Neither
@@ -63,7 +61,6 @@ let%expect_test "Computation: lazy, only refires after invalidate, not at invali
   source := 3;
   Cache.Computation.invalidate computed;
   require_equal (module Int) !calls 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      The next read runs it once, and sees the value the state holds *now*
@@ -131,7 +128,6 @@ let%expect_test "invalidate raises when called from inside a node's computation"
     {|
     Invalid_argument("Cache.Computation.invalidate: a computation cannot be invalidated while a node is being computed")
     |}];
-  (* @mdexp.end *)
   (* @mdexp
 
      Invalidating from outside is unaffected: *)
@@ -181,7 +177,6 @@ let%expect_test "invalidate raises when called from a computation's own f" =
     {|
     Invalid_argument("Cache.Computation.invalidate: a computation cannot be invalidated while a node is being computed")
     |}];
-  (* @mdexp.end *)
   (* @mdexp
 
      The refusal happens before the refresh gets to clear anything, so the

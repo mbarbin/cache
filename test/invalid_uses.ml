@@ -62,7 +62,6 @@ let%expect_test "peek inside a computation: no dependency is recorded" =
   in
   require_equal (module Int) (Cache.Node.value n) 11;
   require_equal (module Int) !calls 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      Now `b` moves. Nothing is stale --- `n` was built from `a` --- so `f`
@@ -98,7 +97,6 @@ let%expect_test "peek inside a computation: an unrelated write papers over it" =
   require_equal (module Int) (Cache.Node.value n) 11;
   Cache.Var.set b 20;
   require_equal (module Int) (Cache.Node.value n) 11;
-  (* @mdexp.end *)
   (* @mdexp
 
      A write to `a` is what finally makes `b`'s change visible --- 2 + 20,
@@ -133,7 +131,6 @@ let%expect_test "value inside a computation: allowed, but untracked" =
     Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x + Cache.Node.value inner)
   in
   require_equal (module Int) (Cache.Node.value outer) 102;
-  (* @mdexp.end *)
   (* @mdexp
 
      Writing `w` is not refused --- the computation is over by now --- but
@@ -142,7 +139,6 @@ let%expect_test "value inside a computation: allowed, but untracked" =
   (* @mdexp.code *)
   Cache.Var.set w 200;
   require_equal (module Int) (Cache.Node.value outer) 102;
-  (* @mdexp.end *)
   (* @mdexp
 
      A write to what `outer` *does* depend on picks up the new `inner` along
@@ -179,7 +175,6 @@ let%expect_test "the fix: compose with map2 rather than peeking" =
   in
   require_equal (module Int) (Cache.Node.value n) 11;
   require_equal (module Int) !calls 1;
-  (* @mdexp.end *)
   (* @mdexp
 
      `b` now counts: *)
@@ -187,7 +182,6 @@ let%expect_test "the fix: compose with map2 rather than peeking" =
   Cache.Var.set b 20;
   require_equal (module Int) (Cache.Node.value n) 21;
   require_equal (module Int) !calls 2;
-  (* @mdexp.end *)
   (* @mdexp
 
      And so does `a`: *)

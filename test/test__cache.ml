@@ -56,7 +56,6 @@ let%expect_test "Cache.clock: ticking it directly counts toward a later Var.set'
   let v = Cache.Var.create cache 1 in
   ignore
     (Cache.Private.Clock.tick (Cache.Private.clock cache) : Cache.Private.Clock.Stamp.t);
-  (* @mdexp.end *)
   (* @mdexp
 
      Then write the var once. Its stamp comes out as the *second*
