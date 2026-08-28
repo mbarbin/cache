@@ -17,16 +17,75 @@ leaving the recompute to whoever reads next --- which is the same
 discipline `Var.set` follows, and for the same reason: the library
 only ever computes what someone asked for.
 
-Two consequences, and the test pins both: invalidating twice between
-reads costs one recompute rather than two, and the value `f` finally
-returns is the one the state held at *read* time, not the one it held
-at either `invalidate`.
+Here `source` stands in for the state the library cannot see, and
+`calls` counts how often `f` has looked at it:
+
+```ocaml
+let cache = Cache.create () in
+let source = ref 1 in
+let calls = ref 0 in
+let computed =
+  Cache.Computation.create cache ~f:(fun () ->
+    incr calls;
+    !source)
+in
+let check ~value ~calls:expected_calls =
+  require_equal (module Int) (Cache.Node.value (Cache.Computation.node computed)) value;
+  require_equal (module Int) !calls expected_calls
+in
+check ~value:1 ~calls:1;
+```
+
+Reading again without invalidating recomputes nothing:
+
+```ocaml
+check ~value:1 ~calls:1;
+```
+
+Now the state changes twice, with an `invalidate` after each. Neither
+call runs `f`: after both of them, `calls` is still 1.
+
+```ocaml
+source := 2;
+Cache.Computation.invalidate computed;
+source := 3;
+Cache.Computation.invalidate computed;
+require_equal (module Int) !calls 1;
+```
+
+The next read runs it once, and sees the value the state holds *now*
+--- 3, the second of the two changes, not the 2 that was current at the
+first `invalidate`:
+
+```ocaml
+check ~value:3 ~calls:2;
+```
 
 ## Nodes built on top see the change
 
 `Computation.node` gives the node to compose with, and from there
 nothing is special: an invalidated computation makes what was built on
 it stale, and a read pulls the change through --- once.
+
+```ocaml
+let cache = Cache.create () in
+let source = ref 1 in
+let computed = Cache.Computation.create cache ~f:(fun () -> !source) in
+let downstream_calls = ref 0 in
+let downstream =
+  Cache.Node.map (Cache.Computation.node computed) ~f:(fun x ->
+    incr downstream_calls;
+    x * 10)
+in
+let check ~value ~calls =
+  require_equal (module Int) (Cache.Node.value downstream) value;
+  require_equal (module Int) !downstream_calls calls
+in
+check ~value:10 ~calls:1;
+source := 2;
+Cache.Computation.invalidate computed;
+check ~value:20 ~calls:2;
+```
 
 ## Invalidating from inside a computation is refused
 
@@ -35,3 +94,27 @@ same reason: an invalidation issued from inside a running computation
 would be lost. It raises `Invalid_argument`, and invalidating from
 outside is unaffected afterwards. See
 [Var](test__var.md#writing-from-inside-a-computation-is-refused).
+
+```ocaml
+let cache = Cache.create () in
+let source = ref 0 in
+let comp = Cache.Computation.create cache ~f:(fun () -> !source) in
+let v = Cache.Var.create cache 1 in
+let node =
+  Cache.Node.map (Cache.Var.watch v) ~f:(fun (_ : int) ->
+    Cache.Computation.invalidate comp)
+in
+require_does_raise (fun () : unit -> Cache.Node.value node);
+[%expect
+  {|
+  Invalid_argument("Cache.Computation.invalidate: a computation cannot be invalidated while a node is being computed")
+  |}];
+```
+
+Invalidating from outside is unaffected:
+
+```ocaml
+incr source;
+Cache.Computation.invalidate comp;
+require_equal (module Int) (Cache.Node.value (Cache.Computation.node comp)) 1;
+```

@@ -64,6 +64,30 @@ kept so the test can reach a child --- belongs in a plain `(* ... *)` comment,
 read by whoever edits the test. Only what a reader of the book needs goes in
 `@mdexp`.
 
+**Every section backed by a test shows that test**, wrapped in
+`@mdexp.code` ... `@mdexp.end` spanning the whole body, so the block stands on
+its own without the reader hunting for where `cache` came from. The prose
+says what the test establishes and why anyone should care; the block is the
+evidence for it, and a section asserting that something recomputed once and
+not twice is worth little without the counters in view.
+
+**Interleave prose with the code for a test that walks through several
+steps.** `@mdexp.end`, then an `@mdexp` paragraph, then `@mdexp.code` again
+resumes the same test, so the book reads as a walkthrough rather than as one
+long block with a preamble. A comment inside a test that narrates what the
+next few lines establish --- "5 to 7 is still odd", "a key that comes back
+gets a fresh child" --- is that paragraph, written in the wrong place; lift it
+out. Comments about how the test is built stay where they are.
+
+Prefer this to summarising the walk in the section's opening paragraph. Say
+what the section establishes and why it matters there, and let the steps speak
+for themselves below.
+
+**A section with no code is a deliberate one.** Chapter introductions, a
+section that exists to point at another chapter, a closing section that names
+the rule the chapter has been circling, instructions for the next contributor
+--- those carry no test and show no code. Everything else does.
+
 **Register the chapter**, in two places: a pair of rules in `test/dune`
 (generate `$FILE.md.gen`, then `diff` it against `$FILE.md` under the
 `runtest` alias), and an entry in the right part of

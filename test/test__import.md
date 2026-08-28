@@ -16,10 +16,31 @@ Without that precaution a value can come out physically equal to
 another for reasons that have nothing to do with the code under
 test.
 
+```ocaml
+(* Built from an [Sys.opaque_identity]-hidden [n], so [a]/[b] can't be
+   recognized as the same literal and shared at compile time — a plain
+   [[ 1 ]] on each side would otherwise print [true] for both lines. *)
+let n = Sys.opaque_identity 1 in
+let a = [ n ] in
+let b = [ n ] in
+Printf.printf "%b\n" (phys_equal a a);
+Printf.printf "%b\n" (phys_equal a b);
+[%expect
+  {|
+  true
+  false
+  |}];
+```
+
 ## print_dyn
 
 Prints a `Dyn.t`, which is how a value reaches an expect-test snapshot
 here.
+
+```ocaml
+print_dyn (Dyn.int 42);
+[%expect {| 42 |}];
+```
 
 ## require_does_raise
 
@@ -31,6 +52,14 @@ That failure path is itself worth a test, and it can be exercised
 without failing anything: an outer `require_does_raise` catches the
 `Failure` the inner one raises when its own `f` does not raise.
 
+```ocaml
+(* The outer [require_does_raise] catches the [Failure] the inner one
+   raises when its own [f] doesn't — exercising that failure path
+   without actually failing this test. *)
+require_does_raise (fun () -> require_does_raise (fun () -> ()));
+[%expect {| Failure("Did not raise.") |}];
+```
+
 ## require_equal
 
 Compares two values with a first-class module supplying `equal` and
@@ -38,7 +67,21 @@ Compares two values with a first-class module supplying `equal` and
 usable in bulk, several to a test, without an expect block after each
 one.
 
+```ocaml
+require_equal (module Int) 1 1;
+[%expect {| |}];
+```
+
 When they disagree it prints both sides before raising, so a failure
 report says what was expected and what actually came out, rather than
 only that something was wrong. That record is what a failing test in
-this suite prints.
+this suite prints:
+
+```ocaml
+require_does_raise (fun () -> require_equal (module Int) 1 2);
+[%expect
+  {|
+  { actual = 1; expected = 2 }
+  Failure("Values are not equal.")
+  |}];
+```

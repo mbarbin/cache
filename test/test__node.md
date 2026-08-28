@@ -16,6 +16,15 @@ reads never runs at all.
 current value. Writing the var and reading the node again yields the
 new value.
 
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 1 in
+let n = Cache.Var.watch v in
+require_equal (module Int) (Cache.Node.value n) 1;
+Cache.Var.set v 2;
+require_equal (module Int) (Cache.Node.value n) 2;
+```
+
 ## A unit var used as a signal
 
 A watch node carries the default `phys_equal` cutoff like any other,
@@ -25,20 +34,91 @@ a var whose type has essentially one value never *looks* changed. A
 point --- `()` is physically equal to itself, so every write is
 absorbed and nothing downstream ever fires.
 
-Disabling the cutoff on the watch node makes every write count. Note
-which node it has to be disabled on: `watch` builds a fresh node per
-call, so the node passed to `map` is the one that must be kept and
-set, not a second `watch` of the same var.
+Note which node the cutoff has to be disabled on: `watch` builds a
+fresh node per call, so the node passed to `map` is the one that must
+be kept and set, not a second `watch` of the same var.
+
+```ocaml
+let cache = Cache.create () in
+let signal = Cache.Var.create cache () in
+(* [watch] builds a fresh node each call, so this one has to be kept and
+   reused below rather than calling [watch] again — otherwise disabling
+   cutoff on a second, independent node wouldn't touch this one. *)
+let signal_node = Cache.Var.watch signal in
+let calls = ref 0 in
+let n =
+  Cache.Node.map signal_node ~f:(fun () ->
+    incr calls;
+    !calls)
+in
+require_equal (module Int) (Cache.Node.value n) 1;
+```
+
+`()` is `phys_equal` to itself, always, so the default cutoff on the
+watch node swallows this write and `n` never recomputes:
+
+```ocaml
+Cache.Var.set signal ();
+require_equal (module Int) (Cache.Node.value n) 1;
+```
+
+Disabling that cutoff makes every write count:
+
+```ocaml
+Cache.Node.set_cutoff signal_node ~equal:(fun () () -> false);
+Cache.Var.set signal ();
+require_equal (module Int) (Cache.Node.value n) 2;
+```
 
 ## map
 
 `map` runs `f` on demand, and only when its parent has actually moved.
 Reading twice with no write in between runs `f` once.
 
+This is the shape most of the tests in this book take: a counter
+incremented inside `f`, and a check that pins the value and the number
+of times `f` has run together, so that "it did not recompute" is
+asserted rather than assumed.
+
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 1 in
+let calls = ref 0 in
+let n =
+  Cache.Node.map (Cache.Var.watch v) ~f:(fun x ->
+    incr calls;
+    x * 10)
+in
+let check ~value ~calls:expected_calls =
+  require_equal (module Int) (Cache.Node.value n) value;
+  require_equal (module Int) !calls expected_calls
+in
+check ~value:10 ~calls:1;
+check ~value:10 ~calls:1;
+Cache.Var.set v 2;
+check ~value:20 ~calls:2;
+```
+
 Writes are targeted rather than global: a write to some other var in
 the same cache advances the shared clock, but does not make this node
 stale. Staleness is decided against the parents a node actually has,
 not against the clock.
+
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 1 in
+let unrelated = Cache.Var.create cache "x" in
+let calls = ref 0 in
+let n =
+  Cache.Node.map (Cache.Var.watch v) ~f:(fun x ->
+    incr calls;
+    x * 10)
+in
+ignore (Cache.Node.value n : int);
+Cache.Var.set unrelated "y";
+require_equal (module Int) (Cache.Node.value n) 10;
+require_equal (module Int) !calls 1;
+```
 
 `map2`, `map3` and the rest of the family get systematic,
 per-component coverage of their own rather than one case each here:
@@ -53,9 +133,44 @@ itself still ran, since running is how it found out.
 
 That distinction is the whole point: work is stopped at the first node
 where the value stopped moving, rather than at the first node where
-the inputs stopped moving. The test reduces an integer to its parity:
-a write taking it from 5 to 7 is absorbed, and one taking it from 7
-to 8 is not.
+the inputs stopped moving. Below, a node reduces an integer to its
+parity --- many different integers share one --- and a downstream node
+counts how often it runs:
+
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 5 in
+(* Many different [v] map to the same parity: [set_cutoff Int.equal]
+   lets [mid] absorb those. *)
+let mid = Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x mod 2) in
+Cache.Node.set_cutoff mid ~equal:Int.equal;
+let downstream_calls = ref 0 in
+let downstream =
+  Cache.Node.map mid ~f:(fun parity ->
+    incr downstream_calls;
+    parity)
+in
+ignore (Cache.Node.value downstream : int);
+require_equal (module Int) !downstream_calls 1;
+```
+
+5 to 7 is still odd. The parity node re-fires its own closure --- it
+has to, to find out --- but its cutoff absorbs the result, so
+`downstream` never even considers recomputing:
+
+```ocaml
+Cache.Var.set v 7;
+ignore (Cache.Node.value downstream : int);
+require_equal (module Int) !downstream_calls 1;
+```
+
+7 to 8 flips the parity, and now the cutoff lets it through:
+
+```ocaml
+Cache.Var.set v 8;
+require_equal (module Int) (Cache.Node.value downstream) 0;
+require_equal (module Int) !downstream_calls 2;
+```
 
 ### both, and what the default cutoff can absorb
 
@@ -63,13 +178,55 @@ A pair node is not special: it recomputes when a component moves, and
 its own cutoff then decides whether that counts. What is worth showing
 is where the *default* cutoff runs out.
 
-The test sets one component to a freshly allocated but equal string.
-That component's own `phys_equal` cutoff cannot absorb it --- a different
-block is a different block --- so the pair does recompute, and
-allocates a new tuple. `phys_equal` cannot absorb that either, and the
-change carries on downstream, although nothing anyone would call a
-change has occurred. An explicit structural `equal` installed on the
-pair stops it there.
+Two pairs over the same two vars, one left with the default cutoff
+and one given a structural `equal`, each with a reader counting how
+often it runs:
+
+```ocaml
+let cache = Cache.create () in
+let a = Cache.Var.create cache "x" in
+let b = Cache.Var.create cache "y" in
+let default_calls = ref 0 in
+let downstream_default =
+  Cache.Node.map
+    (Cache.Node.both (Cache.Var.watch a) (Cache.Var.watch b))
+    ~f:(fun p ->
+      incr default_calls;
+      p)
+in
+let custom_calls = ref 0 in
+let custom_pair = Cache.Node.both (Cache.Var.watch a) (Cache.Var.watch b) in
+Cache.Node.set_cutoff custom_pair ~equal:(fun (a1, b1) (a2, b2) ->
+  String.equal a1 a2 && String.equal b1 b2);
+let downstream_custom =
+  Cache.Node.map custom_pair ~f:(fun p ->
+    incr custom_calls;
+    p)
+in
+ignore (Cache.Node.value downstream_default : string * string);
+ignore (Cache.Node.value downstream_custom : string * string);
+```
+
+Now a freshly allocated string of the same content. `a`'s own watch
+node cannot cut it off --- a different block is a different block ---
+so both pairs recompute, even though neither pair's *content* has
+changed:
+
+```ocaml
+Cache.Var.set a (Bytes.to_string (Bytes.of_string "x"));
+ignore (Cache.Node.value downstream_default : string * string);
+ignore (Cache.Node.value downstream_custom : string * string);
+```
+
+The difference is what each pair's cutoff does with that recompute.
+`phys_equal` cannot absorb the fresh tuple, so the default pair reports
+a change and its reader runs a second time; the structural `equal`
+absorbs it, and its reader does not:
+
+```ocaml
+require_equal (module Int) !default_calls 2;
+require_equal (module Int) !custom_calls 1;
+```
 
 None of which is particular to pairing. Any `f` that allocates its
 result is in the same position, which is exactly when
@@ -80,6 +237,12 @@ result is in the same position, which is exactly when
 A node holding a value that never changes. It has no parent, so
 nothing can ever make it stale.
 
+```ocaml
+let cache = Cache.create () in
+let n = Cache.Node.const cache 42 in
+require_equal (module Int) (Cache.Node.value n) 42;
+```
+
 ## Syntax
 
 `let+` and `and+` are `map` and `both` under applicative syntax, for
@@ -87,16 +250,53 @@ combining more nodes than the `mapN` family covers. There is no `let*`
 --- the graph's shape is fixed where it is written, which is the
 trade this library makes.
 
+Over two vars holding 1 and 2:
+
+```ocaml
+let cache = Cache.create () in
+let a = Cache.Var.create cache 1 in
+let b = Cache.Var.create cache 2 in
+let open Cache.Node.Syntax in
+let n =
+  let+ a = Cache.Var.watch a
+  and+ b = Cache.Var.watch b in
+  a + b
+in
+require_equal (module Int) (Cache.Node.value n) 3;
+```
+
 ## Recomputing reads the clock, it does not tick it
 
 Only a write advances the clock. A node that recomputes stamps itself
-with the clock's *current* reading rather than minting a fresh one, so
-two independent nodes forced for the first time after the same single
-write end up sharing a stamp.
+with the clock's *current* reading rather than minting a fresh one.
 
 That is what makes stamp comparison meaningful across the graph: a
 reading identifies the write that caused a change, not the order in
 which somebody happened to pull the nodes afterwards.
+
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 1 in
+Cache.Var.set v 2;
+```
+
+Two independent nodes, both forced for the first time after that one
+write. Each stamps itself with the clock's current reading rather than
+minting one, so they end up sharing it instead of consuming a tick
+each:
+
+```ocaml
+let n1 = Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x * 10) in
+let n2 = Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x * 100) in
+ignore (Cache.Node.value n1 : int);
+ignore (Cache.Node.value n2 : int);
+require_equal
+  (module Bool)
+  (Cache.Private.Clock.Stamp.equal
+     (Cache.Private.node_stamp n1)
+     (Cache.Private.node_stamp n2))
+  true;
+```
 
 ## watch builds a fresh node every call
 
@@ -105,12 +305,27 @@ with its own cached value and its own cutoff. Nothing memoizes one
 node per var. Sharing is the caller's business: keep whichever call's
 result and reuse it.
 
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 1 in
+require_equal (module Bool) (phys_equal (Cache.Var.watch v) (Cache.Var.watch v)) false;
+let shared = Cache.Var.watch v in
+require_equal (module Bool) (phys_equal shared shared) true;
+```
+
 ## Combining across caches is an error
 
 Stamps are only comparable within one clock, so a node combining
 parents from two different caches could not decide staleness at all.
 Rather than produce a node that quietly gets it wrong, `both` raises
 `Invalid_argument` at construction time.
+
+```ocaml
+let a = Cache.Var.watch (Cache.Var.create (Cache.create ()) 1) in
+let b = Cache.Var.watch (Cache.Var.create (Cache.create ()) 2) in
+require_does_raise (fun () : (int * int) Cache.Node.t -> Cache.Node.both a b);
+[%expect {| Invalid_argument("Cache.Node: nodes were not built from the same clock") |}];
+```
 
 ## collect
 
@@ -127,16 +342,121 @@ resurrecting the old one --- which is what a caller wants when a key
 reappearing means the thing behind it was recreated, a deleted file
 written again under the same name being the motivating case.
 
-The test walks that whole life cycle: reading twice without
-rebuilding, changing one existing child without touching the key set,
-adding a key, removing a key, and bringing a removed key back to find
-its value reset rather than remembered.
+The test walks that whole life cycle. `f` mints one var per key,
+seeded to ten times the key, and `creates` counts how many times it
+was called:
+
+```ocaml
+let cache = Cache.create () in
+let keys = Cache.Var.create cache (keys_of [ 1; 2; 3 ]) in
+(* One [Cache.Var.t] per key, minted by [f] the first time [collect]
+   asks for that key and remembered here so the test can mutate an
+   individual child later without going through [f] again. *)
+let child_vars : (int, int Cache.Var.t) Hashtbl.t =
+  Hashtbl.create (module Int_key) 16
+in
+let creates = ref 0 in
+let f k =
+  incr creates;
+  let v = Cache.Var.create cache (k * 10) in
+  Hashtbl.set child_vars ~key:k ~data:v;
+  Cache.Var.watch v
+in
+let node = Cache.Node.collect (module Int_key) ~keys:(Cache.Var.watch keys) ~f in
+let print () =
+  let map = Cache.Node.value node in
+  let pairs =
+    List.map (Map.to_list map) ~f:(fun (k, v) -> Printf.sprintf "%d=%d" k v)
+  in
+  Printf.printf "[%s]\n" (String.concat ~sep:"; " pairs)
+in
+print ();
+[%expect {| [1=10; 2=20; 3=30] |}];
+require_equal (module Int) !creates 3;
+```
+
+Reading again without any write re-mints nothing:
+
+```ocaml
+print ();
+[%expect {| [1=10; 2=20; 3=30] |}];
+require_equal (module Int) !creates 3;
+```
+
+Changing one existing child's own var --- `keys` never moves --- is
+picked up without minting anything new. This is the whole point of
+`collect` over the coarse "watch one global signal" alternative:
+
+```ocaml
+Cache.Var.set (Hashtbl.find_exn child_vars 2) 99;
+print ();
+[%expect {| [1=10; 2=99; 3=30] |}];
+require_equal (module Int) !creates 3;
+```
+
+Adding a key mints exactly one new child. The existing three are not
+re-minted --- same vars, same values, and `creates` goes to 4 rather
+than 7:
+
+```ocaml
+Cache.Var.set keys (keys_of [ 1; 2; 3; 4 ]);
+print ();
+[%expect {| [1=10; 2=99; 3=30; 4=40] |}];
+require_equal (module Int) !creates 4;
+```
+
+Removing a key drops it from the result, and from the memo table
+behind it:
+
+```ocaml
+Cache.Var.set keys (keys_of [ 1; 3; 4 ]);
+print ();
+[%expect {| [1=10; 3=30; 4=40] |}];
+require_equal (module Int) !creates 4;
+```
+
+And a key that comes back gets a fresh child from `f` rather than the
+old one resurrected. Key 2 returns holding 20, not the 99 the previous
+child for that key had been mutated to:
+
+```ocaml
+Cache.Var.set keys (keys_of [ 1; 2; 3; 4 ]);
+print ();
+[%expect {| [1=10; 2=20; 3=30; 4=40] |}];
+require_equal (module Int) !creates 5;
+```
 
 ### Unrelated writes leave it alone
 
 The dynamic parent set does not make `collect` promiscuous: a write to
 a var it never collected neither re-mints a child nor recomputes
 anything downstream.
+
+```ocaml
+let cache = Cache.create () in
+let keys = Cache.Var.create cache (keys_of [ 1 ]) in
+let unrelated = Cache.Var.create cache "x" in
+let creates = ref 0 in
+let recomputes = ref 0 in
+let node =
+  Cache.Node.collect
+    (module Int_key)
+    ~keys:(Cache.Var.watch keys)
+    ~f:(fun k ->
+      incr creates;
+      Cache.Node.const cache (k * 10))
+in
+let node =
+  Cache.Node.map node ~f:(fun pairs ->
+    incr recomputes;
+    pairs)
+in
+ignore (Cache.Node.value node : (int, int, Int_key.comparator_witness) Map.t);
+Cache.Var.set unrelated "y";
+ignore (Cache.Node.value node : (int, int, Int_key.comparator_witness) Map.t);
+require_equal (module Int) !creates 1;
+require_equal (module Int) !recomputes 1;
+```
 
 ## Deep chains, pulled part-way
 
@@ -150,9 +470,49 @@ not.
 
 The invariant only becomes interesting once a chain is deep enough to
 sit half-resolved and half-marked at the same time, which no two- or
-three-node test can express. So: a chain of fifty, written to and then
-pulled only up to its midpoint, leaving the bottom live and the top
-marked. A second write then cascades into exactly that mixed state and
-stops where it finds marks; the nodes it did not reach must still
-recompute when finally pulled. Then everything is resolved again and
-an ordinary write is shown still travelling the full depth.
+three-node test can express. So, a chain of fifty:
+
+```ocaml
+let cache = Cache.create () in
+let depth = 50 in
+let v = Cache.Var.create cache 0 in
+let nodes = Array.make (depth + 1) (Cache.Var.watch v) in
+for i = 1 to depth do
+  nodes.(i) <- Cache.Node.map nodes.(i - 1) ~f:(fun x -> x + 1)
+done;
+let top = nodes.(depth) in
+require_equal (module Int) (Cache.Node.value top) depth;
+```
+
+Write, then pull only the bottom half. The chain is now live up to the
+midpoint and marked above it --- the state no shallow test can
+reach:
+
+```ocaml
+Cache.Var.set v 10;
+require_equal (module Int) (Cache.Node.value nodes.(depth / 2)) (10 + (depth / 2));
+```
+
+A second write cascades into exactly that mixed chain, and stops where
+it meets the marks. The nodes it never reached are the already-marked
+ones, and they must still recompute when the top is finally pulled:
+
+```ocaml
+Cache.Var.set v 100;
+require_equal (module Int) (Cache.Node.value top) (100 + depth);
+```
+
+Everything is resolved again, and an ordinary write still travels the
+whole depth:
+
+```ocaml
+Cache.Var.set v 1000;
+require_equal (module Int) (Cache.Node.value top) (1000 + depth);
+```
+
+Pulling from the middle afterwards changes nothing anywhere:
+
+```ocaml
+require_equal (module Int) (Cache.Node.value nodes.(depth / 2)) (1000 + (depth / 2));
+require_equal (module Int) (Cache.Node.value top) (1000 + depth);
+```

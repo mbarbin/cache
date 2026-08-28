@@ -35,10 +35,74 @@ recompute happened. Each is written once, in its own step, with the
 value and the call count checked immediately after; a final check with
 no write in between confirms the node has settled.
 
+This is the template an added arity follows:
+
+```ocaml
+let cache = Cache.create () in
+let a = Cache.Var.create cache 1 in
+let b = Cache.Var.create cache 10 in
+let calls = ref 0 in
+let n =
+  Cache.Node.map2 (Cache.Var.watch a) (Cache.Var.watch b) ~f:(fun a b ->
+    incr calls;
+    a + b)
+in
+let check ~value ~calls:expected_calls =
+  require_equal (module Int) (Cache.Node.value n) value;
+  require_equal (module Int) !calls expected_calls
+in
+check ~value:11 ~calls:1;
+Cache.Var.set a 2;
+check ~value:12 ~calls:2;
+Cache.Var.set b 20;
+check ~value:22 ~calls:3;
+```
+
+And it settles: reading again with no write in between does not
+re-fire `f`.
+
+```ocaml
+check ~value:22 ~calls:3;
+```
+
 ## map3
 
 The same shape at arity three --- the one the coverage gap was
 actually found in.
+
+```ocaml
+let cache = Cache.create () in
+let a = Cache.Var.create cache 1 in
+let b = Cache.Var.create cache 10 in
+let c = Cache.Var.create cache 100 in
+let calls = ref 0 in
+let n =
+  Cache.Node.map3
+    (Cache.Var.watch a)
+    (Cache.Var.watch b)
+    (Cache.Var.watch c)
+    ~f:(fun a b c ->
+      incr calls;
+      a + b + c)
+in
+let check ~value ~calls:expected_calls =
+  require_equal (module Int) (Cache.Node.value n) value;
+  require_equal (module Int) !calls expected_calls
+in
+check ~value:111 ~calls:1;
+Cache.Var.set a 2;
+check ~value:112 ~calls:2;
+Cache.Var.set b 20;
+check ~value:122 ~calls:3;
+Cache.Var.set c 200;
+check ~value:222 ~calls:4;
+```
+
+Settling, as before:
+
+```ocaml
+check ~value:222 ~calls:4;
+```
 
 ## Adding an arity
 

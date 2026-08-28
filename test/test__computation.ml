@@ -27,13 +27,12 @@ open! Import
    discipline `Var.set` follows, and for the same reason: the library
    only ever computes what someone asked for.
 
-   Two consequences, and the test pins both: invalidating twice between
-   reads costs one recompute rather than two, and the value `f` finally
-   returns is the one the state held at *read* time, not the one it held
-   at either `invalidate`. *)
+   Here `source` stands in for the state the library cannot see, and
+   `calls` counts how often `f` has looked at it: *)
 
 let%expect_test "Computation: lazy, only refires after invalidate, not at invalidate time"
   =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let source = ref 1 in
   let calls = ref 0 in
@@ -47,16 +46,32 @@ let%expect_test "Computation: lazy, only refires after invalidate, not at invali
     require_equal (module Int) !calls expected_calls
   in
   check ~value:1 ~calls:1;
-  (* Reading again without invalidating doesn't recompute. *)
+  (* @mdexp.end *)
+  (* @mdexp
+
+     Reading again without invalidating recomputes nothing: *)
+  (* @mdexp.code *)
   check ~value:1 ~calls:1;
-  (* The source changes twice, but [invalidate] doesn't itself call
-     [f] — only the next read does, once, seeing the latest value. *)
+  (* @mdexp.end *)
+  (* @mdexp
+
+     Now the state changes twice, with an `invalidate` after each. Neither
+     call runs `f`: after both of them, `calls` is still 1. *)
+  (* @mdexp.code *)
   source := 2;
   Cache.Computation.invalidate computed;
   source := 3;
   Cache.Computation.invalidate computed;
   require_equal (module Int) !calls 1;
+  (* @mdexp.end *)
+  (* @mdexp
+
+     The next read runs it once, and sees the value the state holds *now*
+     --- 3, the second of the two changes, not the 2 that was current at the
+     first `invalidate`: *)
+  (* @mdexp.code *)
   check ~value:3 ~calls:2;
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -69,6 +84,7 @@ let%expect_test "Computation: lazy, only refires after invalidate, not at invali
    it stale, and a read pulls the change through --- once. *)
 
 let%expect_test "Computation: a downstream node sees the change too, once" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let source = ref 1 in
   let computed = Cache.Computation.create cache ~f:(fun () -> !source) in
@@ -86,6 +102,7 @@ let%expect_test "Computation: a downstream node sees the change too, once" =
   source := 2;
   Cache.Computation.invalidate computed;
   check ~value:20 ~calls:2;
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -100,6 +117,7 @@ let%expect_test "Computation: a downstream node sees the change too, once" =
    [Var](test__var.md#writing-from-inside-a-computation-is-refused). *)
 
 let%expect_test "invalidate raises when called from inside a node's computation" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let source = ref 0 in
   let comp = Cache.Computation.create cache ~f:(fun () -> !source) in
@@ -113,9 +131,14 @@ let%expect_test "invalidate raises when called from inside a node's computation"
     {|
     Invalid_argument("Cache.Computation.invalidate: a computation cannot be invalidated while a node is being computed")
     |}];
-  (* Invalidating from outside is unaffected. *)
+  (* @mdexp.end *)
+  (* @mdexp
+
+     Invalidating from outside is unaffected: *)
+  (* @mdexp.code *)
   incr source;
   Cache.Computation.invalidate comp;
   require_equal (module Int) (Cache.Node.value (Cache.Computation.node comp)) 1;
+  (* @mdexp.end *)
   ()
 ;;

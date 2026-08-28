@@ -27,6 +27,7 @@ open! Import
    test. *)
 
 let%expect_test "phys_equal" =
+  (* @mdexp.code *)
   (* Built from an [Sys.opaque_identity]-hidden [n], so [a]/[b] can't be
      recognized as the same literal and shared at compile time — a plain
      [[ 1 ]] on each side would otherwise print [true] for both lines. *)
@@ -40,6 +41,7 @@ let%expect_test "phys_equal" =
     true
     false
     |}];
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -51,8 +53,10 @@ let%expect_test "phys_equal" =
    here. *)
 
 let%expect_test "print_dyn" =
+  (* @mdexp.code *)
   print_dyn (Dyn.int 42);
   [%expect {| 42 |}];
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -69,11 +73,13 @@ let%expect_test "print_dyn" =
    `Failure` the inner one raises when its own `f` does not raise. *)
 
 let%expect_test "require_does_raise: reports when [f] does not raise" =
+  (* @mdexp.code *)
   (* The outer [require_does_raise] catches the [Failure] the inner one
      raises when its own [f] doesn't — exercising that failure path
      without actually failing this test. *)
   require_does_raise (fun () -> require_does_raise (fun () -> ()));
   [%expect {| Failure("Did not raise.") |}];
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -87,8 +93,10 @@ let%expect_test "require_does_raise: reports when [f] does not raise" =
    one. *)
 
 let%expect_test "require_equal: passes silently when the values are equal" =
+  (* @mdexp.code *)
   require_equal (module Int) 1 1;
   [%expect {| |}];
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -97,14 +105,16 @@ let%expect_test "require_equal: passes silently when the values are equal" =
    When they disagree it prints both sides before raising, so a failure
    report says what was expected and what actually came out, rather than
    only that something was wrong. That record is what a failing test in
-   this suite prints. *)
+   this suite prints: *)
 
 let%expect_test "require_equal: reports both sides when the values are not equal" =
+  (* @mdexp.code *)
   require_does_raise (fun () -> require_equal (module Int) 1 2);
   [%expect
     {|
     { actual = 1; expected = 2 }
     Failure("Values are not equal.")
     |}];
+  (* @mdexp.end *)
   ()
 ;;

@@ -32,11 +32,13 @@ let print_stamp s = print_dyn (Cache.Private.Clock.Stamp.to_dyn s)
    particular thing". *)
 
 let%expect_test "Cache.clock: a fresh cache reads Stamp.zero" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   require_equal
     (module Cache.Private.Clock.Stamp)
     (Cache.Private.Clock.now (Cache.Private.clock cache))
     Cache.Private.Clock.Stamp.zero;
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -45,26 +47,26 @@ let%expect_test "Cache.clock: a fresh cache reads Stamp.zero" =
    ## The clock handed back is the live one
 
    `Cache.clock` returns the clock that `Var.set` itself advances, not a
-   copy or a snapshot of it. Ticking it by hand and then writing a var
-   makes that visible: the var's stamp comes out as the *second*
-   reading, because the manual tick already consumed the first. Had
-   `clock` returned a side channel of its own, the write would have
-   stamped the var with 1. *)
+   copy or a snapshot of it. Tick it by hand, with no `Var.set` involved
+   anywhere: *)
 
 let%expect_test "Cache.clock: ticking it directly counts toward a later Var.set's stamp" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
-  (* Tick the shared clock directly — no [Var.set] involved at all — then
-     [set] once. *)
   ignore
     (Cache.Private.Clock.tick (Cache.Private.clock cache) : Cache.Private.Clock.Stamp.t);
+  (* @mdexp.end *)
+  (* @mdexp
+
+     Then write the var once. Its stamp comes out as the *second*
+     reading, not the first: the manual tick was a real write to the one
+     clock `set` advances too. Had `clock` handed back a side channel of
+     its own, this would print 1. *)
+  (* @mdexp.code *)
   Cache.Var.set v 2;
-  (* [v]'s stamp is the *second* reading, not the first: the manual tick
-     was a real write to the one clock [set] itself advances too, not a
-     side channel of its own — proof [Cache.clock] hands back the live
-     clock every var/node built from [cache] actually shares, not a copy
-     or a snapshot. *)
   print_stamp (Cache.Private.var_stamp v);
   [%expect {| 2 |}];
+  (* @mdexp.end *)
   ()
 ;;

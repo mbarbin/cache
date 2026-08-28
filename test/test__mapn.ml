@@ -45,9 +45,12 @@ open! Import
    also pins down *which* component a change landed on, not merely that a
    recompute happened. Each is written once, in its own step, with the
    value and the call count checked immediately after; a final check with
-   no write in between confirms the node has settled. *)
+   no write in between confirms the node has settled.
+
+   This is the template an added arity follows: *)
 
 let%expect_test "map2: each component independently triggers a recompute" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache 1 in
   let b = Cache.Var.create cache 10 in
@@ -66,8 +69,14 @@ let%expect_test "map2: each component independently triggers a recompute" =
   check ~value:12 ~calls:2;
   Cache.Var.set b 20;
   check ~value:22 ~calls:3;
-  (* Re-reading without a further write doesn't re-fire [f]. *)
+  (* @mdexp.end *)
+  (* @mdexp
+
+     And it settles: reading again with no write in between does not
+     re-fire `f`. *)
+  (* @mdexp.code *)
   check ~value:22 ~calls:3;
+  (* @mdexp.end *)
   ()
 ;;
 
@@ -79,6 +88,7 @@ let%expect_test "map2: each component independently triggers a recompute" =
    actually found in. *)
 
 let%expect_test "map3: each component independently triggers a recompute" =
+  (* @mdexp.code *)
   let cache = Cache.create () in
   let a = Cache.Var.create cache 1 in
   let b = Cache.Var.create cache 10 in
@@ -104,8 +114,13 @@ let%expect_test "map3: each component independently triggers a recompute" =
   check ~value:122 ~calls:3;
   Cache.Var.set c 200;
   check ~value:222 ~calls:4;
-  (* Re-reading without a further write doesn't re-fire [f]. *)
+  (* @mdexp.end *)
+  (* @mdexp
+
+     Settling, as before: *)
+  (* @mdexp.code *)
   check ~value:222 ~calls:4;
+  (* @mdexp.end *)
   ()
 ;;
 
