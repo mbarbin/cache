@@ -127,3 +127,20 @@
  (alias runtest)
  (action
   (diff test__import.md test__import.md.gen)))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (target invalid_uses.md.gen)
+ (deps invalid_uses.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run mdexp pp %{deps}))))
+
+(rule
+ (package pulicomv-dev)
+ (enabled_if %{bin-available:mdexp})
+ (alias runtest)
+ (action
+  (diff invalid_uses.md invalid_uses.md.gen)))

@@ -38,6 +38,33 @@ snapshots checked on every build, so the book cannot drift from the
 implementation: if a behaviour changes, the test fails before the prose has a
 chance to become a lie.
 
+## Two kinds of chapter
+
+**Module chapters** cover one source module each. `src/node.ml` is tested by
+`test/test__node.ml` and documented by `test__node.md`. The set of them is
+fixed by the set of source modules, which is what makes "is every function
+tested?" a question with an answer: a function with no section is a gap,
+visible as one.
+
+**Concept chapters** cover one *category* each. They are for what no single
+module owns --- an invariant several modules uphold together, a failure mode
+that only appears when two of them are combined, a rule a reader has to know
+before writing any of it. [Invalid uses](invalid_uses.md) is the first: what
+happens when a node's `f` writes, or reads something it was not built from.
+
+The two axes are meant to overlap, not to compete. A module chapter states
+what an operation guarantees, at the place a reader looks the operation up. A
+concept chapter explains a category and works through it end to end. When
+both would cover the same ground, the module chapter keeps the contract and
+the test that pins it, and the concept chapter links to it rather than
+restating it --- `Var.set` raising from inside a computation is documented
+under `Var`, and [Invalid uses](invalid_uses.md) links there and spends its
+own space on the misuses that *do not* raise.
+
+Both kinds sit flat in `test/`, and the file name is what tells them apart: a
+concept chapter is named for its category (`invalid_uses.ml`), while `test__`
+is reserved for the module chapters that mirror a source file.
+
 ## Rules for adding a chapter
 
 **Every chapter opens with a single `#` title and says what it is about.**

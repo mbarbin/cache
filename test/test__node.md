@@ -232,6 +232,161 @@ None of which is particular to pairing. Any `f` that allocates its
 result is in the same position, which is exactly when
 `Node.set_cutoff` is worth reaching for.
 
+### The first computation always counts as a change
+
+A cutoff compares a fresh value against the previously cached one, and
+on the first computation there is no previous one. So the first
+computation counts as a change however permissive the cutoff is ---
+even under the `equal` the test installs, which claims nothing ever
+changes.
+
+Pinning that down takes some care. What has to be shown is that the
+node moved off the stamp it was *built* with and that its `f` really
+ran; not that its stamp differs from zero, which would still read as
+passing under a clock that never started there. So the clock is
+deliberately advanced by an unrelated write before the node exists,
+the node records in a ref that it ran, and every assertion is about
+the node's own trajectory from its construction onward.
+
+```ocaml
+let cache = Cache.create () in
+let clock = Cache.Private.clock cache in
+let v = Cache.Var.create cache 1 in
+(* Somebody else's write, before [n] is built. *)
+let unrelated = Cache.Var.create cache "x" in
+Cache.Var.set unrelated "y";
+let built_at = Cache.Private.Clock.now clock in
+let fired = ref false in
+let n =
+  Cache.Node.map (Cache.Var.watch v) ~f:(fun x ->
+    fired := true;
+    x)
+in
+(* A cutoff that claims nothing ever changes. *)
+Cache.Node.set_cutoff n ~equal:(fun _ _ -> true);
+Cache.Var.set v 2;
+let after_write = Cache.Private.Clock.now clock in
+require_equal (module Bool) (Cache.Private.Clock.Stamp.equal built_at after_write) false;
+```
+
+Forcing it: the closure runs, and the stamp becomes a reading `n`
+cannot have been carrying before, since it postdates `n`'s
+construction.
+
+```ocaml
+let first = Cache.Private.node_stamp n in
+require_equal (module Bool) !fired true;
+require_equal (module Cache.Private.Clock.Stamp) first after_write;
+```
+
+Every computation after that one is absorbed. The closure still fires
+and the clock still moves; the stamp is what stays put:
+
+```ocaml
+fired := false;
+Cache.Var.set v 3;
+let second = Cache.Private.node_stamp n in
+require_equal (module Bool) !fired true;
+require_equal (module Cache.Private.Clock.Stamp) second first;
+require_equal
+  (module Bool)
+  (Cache.Private.Clock.Stamp.equal second (Cache.Private.Clock.now clock))
+  false;
+```
+
+### phys_equal earns its keep on ordinary code
+
+The default is worth having rather than merely tolerating. An `f` that
+hands back one of its own arguments --- a projection, a lookup, a
+value passed straight through --- returns the very same block whenever
+that argument did not move, so the cutoff fires with no `equal`
+written by anybody. Below, a projection over two parents, with a sink
+reading it:
+
+```ocaml
+let cache = Cache.create () in
+let a = Cache.Var.create cache (ref 1) in
+let b = Cache.Var.create cache (ref 2) in
+let projections = ref 0 in
+let proj =
+  Cache.Node.map2 (Cache.Var.watch a) (Cache.Var.watch b) ~f:(fun x _y ->
+    incr projections;
+    x)
+in
+let sinks = ref 0 in
+let sink =
+  Cache.Node.map proj ~f:(fun r ->
+    incr sinks;
+    !r)
+in
+require_equal (module Int) (Cache.Node.value sink) 1;
+require_equal (module Int) !projections 1;
+require_equal (module Int) !sinks 1;
+```
+
+`b` moves, so the projection re-fires --- and hands back the very same
+`a` it had. `phys_equal` sees that, and the sink does not run:
+
+```ocaml
+Cache.Var.set b (ref 22);
+require_equal (module Int) (Cache.Node.value sink) 1;
+require_equal (module Int) !projections 2;
+require_equal (module Int) !sinks 1;
+```
+
+`a` moves: a real change, all the way down:
+
+```ocaml
+Cache.Var.set a (ref 11);
+require_equal (module Int) (Cache.Node.value sink) 11;
+require_equal (module Int) !projections 3;
+require_equal (module Int) !sinks 2;
+```
+
+### Sharing a node shares its cutoff
+
+A cutoff is state on a node rather than on whatever reads it. Several
+readers can share one node --- the node a single `Var.watch` call
+returned, kept and passed around --- and when they do, they share its
+cached value and its cutoff along with it. There is no per-reader
+view: one cutoff, and it decides what all of them see.
+
+```ocaml
+let cache = Cache.create () in
+let v = Cache.Var.create cache 1 in
+let shared = Cache.Var.watch v in
+(* A cutoff that lets nothing through. *)
+Cache.Node.set_cutoff shared ~equal:(fun _ _ -> true);
+let calls_1 = ref 0 in
+let n1 =
+  Cache.Node.map shared ~f:(fun x ->
+    incr calls_1;
+    x)
+in
+let calls_2 = ref 0 in
+let n2 =
+  Cache.Node.map shared ~f:(fun x ->
+    incr calls_2;
+    x)
+in
+require_equal (module Int) (Cache.Node.value n1) 1;
+require_equal (module Int) (Cache.Node.value n2) 1;
+require_equal (module Int) !calls_1 1;
+require_equal (module Int) !calls_2 1;
+```
+
+The var is written, and neither reader hears about it. The second one
+never asked for that cutoff; it reads the node the cutoff is on, which
+is the whole of what determines what it sees:
+
+```ocaml
+Cache.Var.set v 42;
+require_equal (module Int) (Cache.Node.value n1) 1;
+require_equal (module Int) (Cache.Node.value n2) 1;
+require_equal (module Int) !calls_1 1;
+require_equal (module Int) !calls_2 1;
+```
+
 ## const
 
 A node holding a value that never changes. It has no parent, so
@@ -456,6 +611,110 @@ Cache.Var.set unrelated "y";
 ignore (Cache.Node.value node : (int, int, Int_key.comparator_witness) Map.t);
 require_equal (module Int) !creates 1;
 require_equal (module Int) !recomputes 1;
+```
+
+### A re-fold that changes nothing yields the same map
+
+The interface claims that a key whose child did not change keeps the
+binding it already had, physically unchanged. That rests on `collect`
+folding its result *onto the previous map* rather than rebuilding one
+from empty: an unchanged key is re-added the value already bound to
+it, and adding a binding a map already holds returns that same map
+rather than a copy of it.
+
+Followed through, a re-fold in which nothing moved produces the
+physically same map, which `collect`'s own default cutoff then
+absorbs --- so nothing downstream runs at all.
+
+Getting `collect` to re-fold in the first place takes a nudge: the
+test writes a freshly allocated set of equal contents, which the
+`keys` watch node has no cutoff to absorb, so `collect` is genuinely
+asked to look again. It looks, and finds nothing has changed.
+
+```ocaml
+let cache = Cache.create () in
+let keys = Cache.Var.create cache (keys_of [ 1; 2 ]) in
+let node =
+  Cache.Node.collect
+    (module Int_key)
+    ~keys:(Cache.Var.watch keys)
+    ~f:(fun k -> Cache.Node.const cache (k * 10))
+in
+let downstream = ref 0 in
+let sink =
+  Cache.Node.map node ~f:(fun map ->
+    incr downstream;
+    Map.cardinal map)
+in
+require_equal (module Int) (Cache.Node.value sink) 2;
+require_equal (module Int) !downstream 1;
+Cache.Var.set keys (keys_of [ 1; 2 ]);
+require_equal (module Int) (Cache.Node.value sink) 2;
+require_equal (module Int) !downstream 1;
+```
+
+Same elements, built in a different order --- still the same set, so
+still the same map:
+
+```ocaml
+Cache.Var.set keys (keys_of [ 2; 1 ]);
+require_equal (module Int) (Cache.Node.value sink) 2;
+require_equal (module Int) !downstream 1;
+```
+
+### Reading one key cuts off when a different key changes
+
+That preserved binding is what makes reading a single key out of a
+collection worthwhile. Below, a node extracts key 1 out of the
+collection, and a sink reads that:
+
+```ocaml
+let cache = Cache.create () in
+let keys = Cache.Var.create cache (keys_of [ 1; 2 ]) in
+let child_vars : (int, int ref Cache.Var.t) Hashtbl.t =
+  Hashtbl.create (module Int_key) 16
+in
+let f k =
+  let v = Cache.Var.create cache (ref (k * 10)) in
+  Hashtbl.set child_vars ~key:k ~data:v;
+  Cache.Var.watch v
+in
+let node = Cache.Node.collect (module Int_key) ~keys:(Cache.Var.watch keys) ~f in
+let extracts = ref 0 in
+let one =
+  Cache.Node.map node ~f:(fun map ->
+    incr extracts;
+    Map.find_exn map 1)
+in
+let sinks = ref 0 in
+let sink =
+  Cache.Node.map one ~f:(fun r ->
+    incr sinks;
+    !r)
+in
+require_equal (module Int) (Cache.Node.value sink) 10;
+require_equal (module Int) !extracts 1;
+require_equal (module Int) !sinks 1;
+```
+
+Key 2 moves. The extracting node has to look again --- the map is a
+new one --- and finds key 1 exactly as it left it, so its own cutoff
+stops the change there:
+
+```ocaml
+Cache.Var.set (Hashtbl.find_exn child_vars 2) (ref 999);
+require_equal (module Int) (Cache.Node.value sink) 10;
+require_equal (module Int) !extracts 2;
+require_equal (module Int) !sinks 1;
+```
+
+Key 1 moves: this one has to reach the sink:
+
+```ocaml
+Cache.Var.set (Hashtbl.find_exn child_vars 1) (ref 111);
+require_equal (module Int) (Cache.Node.value sink) 111;
+require_equal (module Int) !extracts 3;
+require_equal (module Int) !sinks 2;
 ```
 
 ## Deep chains, pulled part-way

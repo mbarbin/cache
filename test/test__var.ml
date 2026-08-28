@@ -175,51 +175,8 @@ let%expect_test "set raises when called from inside a node's computation" =
 
 (* @mdexp
 
-   ## Reading a node from inside a computation is allowed
-
-   A nested read tells nothing to anybody, so unlike a write it does not
-   raise. It also records nothing: the outer node does not become
-   dependent on what it read, exactly as `Var.peek` would not make it
-   dependent on a var.
-
-   `inner` below is a node over the var `w`, and `outer` is built from
-   the var `v` while reading `inner` from inside its `f`: *)
-
-let%expect_test "reading a node from inside a computation: allowed, but untracked" =
-  (* @mdexp.code *)
-  let cache = Cache.create () in
-  let v = Cache.Var.create cache 1 in
-  let w = Cache.Var.create cache 100 in
-  let inner = Cache.Node.map (Cache.Var.watch w) ~f:(fun x -> x + 1) in
-  let outer =
-    Cache.Node.map (Cache.Var.watch v) ~f:(fun x ->
-      (* A nested pull, not a write: nothing is told anything, so unlike
-         [Var.set] above this doesn't raise. *)
-      x + Cache.Node.value inner)
-  in
-  require_equal (module Int) (Cache.Node.value outer) 102;
-  (* @mdexp.end *)
-  (* @mdexp
-
-     Writing `w` is not refused --- the computation is over by now ---
-     but `outer` was built from `v` alone, so it is not stale and keeps
-     the value it has: *)
-  (* @mdexp.code *)
-  Cache.Var.set w 200;
-  require_equal (module Int) (Cache.Node.value outer) 102;
-  (* @mdexp.end *)
-  (* @mdexp
-
-     A write to what `outer` *does* depend on picks up the new `inner`
-     along the way: *)
-  (* @mdexp.code *)
-  Cache.Var.set v 2;
-  require_equal (module Int) (Cache.Node.value outer) 203;
-  (* @mdexp.end *)
-  ()
-;;
-
-(* @mdexp
-
-   Nothing here is broken: the dependency simply was never declared.
-   Building `outer` with `map2` over both parents is what declares it. *)
+   Reading, by contrast, is allowed from inside a computation and does
+   not raise --- but records no dependency either, which is a trap of a
+   different kind. That is a story spanning `Var`, `Node` and
+   `Computation` rather than a fact about `set`, and it has a chapter of
+   its own: [Invalid uses](invalid_uses.md). *)
