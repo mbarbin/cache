@@ -11,7 +11,6 @@ type t = cache
 
 let create () : t = { clock = Clock.create (); refreshing = false }
 
-module Clock = Clock
 module Node = Node
 
 module Var = struct
@@ -29,4 +28,10 @@ end
 
 module Computation = Computation
 
-let clock (t : t) = t.clock
+module Private = struct
+  module Clock = Clock
+
+  let clock (t : t) = t.clock
+  let node_stamp = Node.stamp
+  let var_stamp = Var.stamp
+end

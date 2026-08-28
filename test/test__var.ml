@@ -6,13 +6,16 @@
 
 open! Import
 
-let print_stamp s = print_dyn (Cache.Clock.Stamp.to_dyn s)
+let print_stamp s = print_dyn (Cache.Private.Clock.Stamp.to_dyn s)
 
 let%expect_test "create starts at Stamp.zero" =
   let cache = Cache.create () in
   let v = Cache.Var.create cache 1 in
   require_equal (module Int) (Cache.Var.peek v) 1;
-  require_equal (module Cache.Clock.Stamp) (Cache.Var.stamp v) Cache.Clock.Stamp.zero;
+  require_equal
+    (module Cache.Private.Clock.Stamp)
+    (Cache.Private.var_stamp v)
+    Cache.Private.Clock.Stamp.zero;
   ()
 ;;
 
@@ -24,7 +27,10 @@ let%expect_test "create starts at Stamp.zero even after the cache has ticked" =
      at [Stamp.zero], not "the cache's current reading" — [create]
      doesn't read the cache at all, only [set] does. *)
   let b = Cache.Var.create cache "b0" in
-  require_equal (module Cache.Clock.Stamp) (Cache.Var.stamp b) Cache.Clock.Stamp.zero;
+  require_equal
+    (module Cache.Private.Clock.Stamp)
+    (Cache.Private.var_stamp b)
+    Cache.Private.Clock.Stamp.zero;
   ()
 ;;
 
@@ -33,11 +39,11 @@ let%expect_test "set replaces the value and ticks the shared cache" =
   let v = Cache.Var.create cache 1 in
   Cache.Var.set v 2;
   require_equal (module Int) (Cache.Var.peek v) 2;
-  print_stamp (Cache.Var.stamp v);
+  print_stamp (Cache.Private.var_stamp v);
   [%expect {| 1 |}];
   Cache.Var.set v 3;
   require_equal (module Int) (Cache.Var.peek v) 3;
-  print_stamp (Cache.Var.stamp v);
+  print_stamp (Cache.Private.var_stamp v);
   [%expect {| 2 |}];
   ()
 ;;
@@ -47,10 +53,13 @@ let%expect_test "two vars sharing a cache: only the one written ticks" =
   let a = Cache.Var.create cache "a0" in
   let b = Cache.Var.create cache "b0" in
   Cache.Var.set a "a1";
-  print_stamp (Cache.Var.stamp a);
+  print_stamp (Cache.Private.var_stamp a);
   [%expect {| 1 |}];
   (* [b] keeps its own stamp even though the shared cache moved on. *)
-  require_equal (module Cache.Clock.Stamp) (Cache.Var.stamp b) Cache.Clock.Stamp.zero;
+  require_equal
+    (module Cache.Private.Clock.Stamp)
+    (Cache.Private.var_stamp b)
+    Cache.Private.Clock.Stamp.zero;
   require_equal (module String) (Cache.Var.peek b) "b0";
   ()
 ;;

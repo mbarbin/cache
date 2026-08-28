@@ -182,7 +182,9 @@ let%expect_test "recomputing reads the cache, it doesn't tick it: siblings share
   ignore (Cache.Node.value n2 : int);
   require_equal
     (module Bool)
-    (Cache.Clock.Stamp.equal (Cache.Node.stamp n1) (Cache.Node.stamp n2))
+    (Cache.Private.Clock.Stamp.equal
+       (Cache.Private.node_stamp n1)
+       (Cache.Private.node_stamp n2))
     true;
   ()
 ;;
