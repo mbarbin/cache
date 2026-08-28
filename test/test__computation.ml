@@ -142,3 +142,55 @@ let%expect_test "invalidate raises when called from inside a node's computation"
   (* @mdexp.end *)
   ()
 ;;
+
+(* @mdexp
+
+   ### From a computation's own `f`
+
+   The `f` a computation is built from is a node's computation like any
+   other, and the restriction reaches it too: the guard is held for the
+   whole of a `Node.value` call, whatever kind of node that call ends up
+   running.
+
+   It is the case with the least left to fall back on. Every other node
+   decides staleness by comparing a parent's stamp against its own last
+   look, so an invalidation lost there can still be made good by a later
+   write to a real parent. A computation has no parent: `invalidate` is
+   the only thing that ever marks it stale, and a refresh ends by
+   clearing that mark. An invalidation issued from inside the very
+   refresh about to clear it would not be delayed or absorbed --- there
+   would be nothing left of it anywhere.
+
+   A computation whose `f` invalidates itself. The `ref` is only there so
+   that `f` can name the computation it is part of: *)
+
+let%expect_test "invalidate raises when called from a computation's own f" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let self = ref None in
+  let comp =
+    Cache.Computation.create cache ~f:(fun () ->
+      (match !self with
+       | None -> ()
+       | Some comp -> Cache.Computation.invalidate comp);
+      0)
+  in
+  self := Some comp;
+  require_does_raise (fun () : int -> Cache.Node.value (Cache.Computation.node comp));
+  [%expect
+    {|
+    Invalid_argument("Cache.Computation.invalidate: a computation cannot be invalidated while a node is being computed")
+    |}];
+  (* @mdexp.end *)
+  (* @mdexp
+
+     The refusal happens before the refresh gets to clear anything, so the
+     node is left stale rather than resolved on a half-computed value.
+     With the self-invalidation out of the way, the next read computes it
+     normally: *)
+  (* @mdexp.code *)
+  self := None;
+  require_equal (module Int) (Cache.Node.value (Cache.Computation.node comp)) 0;
+  (* @mdexp.end *)
+  ()
+;;

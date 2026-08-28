@@ -175,6 +175,40 @@ let%expect_test "set raises when called from inside a node's computation" =
 
 (* @mdexp
 
+   ### From a computation's own `f`
+
+   A `Computation.create` closure is no exception. The guard covers the
+   whole of a `Node.value` call, whatever kind of node that call runs, so
+   a `set` from a computation's own `f` is refused exactly as one from a
+   `map`'s is.
+
+   The var written below is one the computation does not read, and has no
+   node watching it at all. It is still refused: the check is on a refresh
+   being in flight, not on who the cascade would have reached: *)
+
+let%expect_test "set raises when called from a computation's own f" =
+  (* @mdexp.code *)
+  let cache = Cache.create () in
+  let other = Cache.Var.create cache 10 in
+  let comp = Cache.Computation.create cache ~f:(fun () -> Cache.Var.set other 20) in
+  require_does_raise (fun () : unit -> Cache.Node.value (Cache.Computation.node comp));
+  [%expect
+    {|
+    Invalid_argument("Cache.Var.set: a var cannot be set while a node is being computed")
+    |}];
+  (* @mdexp.end *)
+  (* @mdexp
+
+     And refused before anything is mutated, not rolled back after the
+     fact --- `other` still holds what it held: *)
+  (* @mdexp.code *)
+  require_equal (module Int) (Cache.Var.peek other) 10;
+  (* @mdexp.end *)
+  ()
+;;
+
+(* @mdexp
+
    Reading, by contrast, is allowed from inside a computation and does
    not raise --- but records no dependency either, which is a trap of a
    different kind. That is a story spanning `Var`, `Node` and
