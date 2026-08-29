@@ -551,20 +551,7 @@ let%expect_test "both raises when the two nodes don't share a cache" =
   ()
 ;;
 
-module Int_key = struct
-  type t = int
-  type comparator_witness
-
-  let equal (a : int) b = a = b
-  let hash = Stdlib.Hashtbl.hash
-
-  (* Needed to build the [keys] sets below via [Set.of_list], and by
-     [collect] itself to mint the empty [Map.t] its result starts from —
-     [equal]/[hash] above are only for its own internal [table]. *)
-  let compare a b = Ordering.of_int (Stdlib.Int.compare a b)
-end
-
-let keys_of li = Set.of_list (module Int_key) li
+let keys_of li = Set.of_list (module Int) li
 
 (* @mdexp
 
@@ -594,9 +581,7 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
   (* One [Cache.Var.t] per key, minted by [f] the first time [collect]
      asks for that key and remembered here so the test can mutate an
      individual child later without going through [f] again. *)
-  let child_vars : (int, int Cache.Var.t) Hashtbl.t =
-    Hashtbl.create (module Int_key) 16
-  in
+  let child_vars : (int, int Cache.Var.t) Hashtbl.t = Hashtbl.create (module Int) 16 in
   let creates = ref 0 in
   let f k =
     incr creates;
@@ -604,7 +589,7 @@ let%expect_test "collect: a dynamic, keyed collection of nodes" =
     Hashtbl.set child_vars ~key:k ~data:v;
     Cache.Var.watch v
   in
-  let node = Cache.Node.collect (module Int_key) ~keys:(Cache.Var.watch keys) ~f in
+  let node = Cache.Node.collect (module Int) ~keys:(Cache.Var.watch keys) ~f in
   let print () =
     let map = Cache.Node.value node in
     let pairs =
@@ -682,7 +667,7 @@ let%expect_test "collect: an unrelated var's write doesn't force a recompute" =
   let recomputes = ref 0 in
   let node =
     Cache.Node.collect
-      (module Int_key)
+      (module Int)
       ~keys:(Cache.Var.watch keys)
       ~f:(fun k ->
         incr creates;
@@ -693,9 +678,9 @@ let%expect_test "collect: an unrelated var's write doesn't force a recompute" =
       incr recomputes;
       pairs)
   in
-  ignore (Cache.Node.value node : (int, int, Int_key.comparator_witness) Map.t);
+  ignore (Cache.Node.value node : (int, int, Int.comparator_witness) Map.t);
   Cache.Var.set unrelated "y";
-  ignore (Cache.Node.value node : (int, int, Int_key.comparator_witness) Map.t);
+  ignore (Cache.Node.value node : (int, int, Int.comparator_witness) Map.t);
   require_equal (module Int) !creates 1;
   require_equal (module Int) !recomputes 1;
   (* @mdexp.end *)
@@ -727,7 +712,7 @@ let%expect_test "collect: a re-fold that changes nothing yields the same map" =
   let keys = Cache.Var.create cache (keys_of [ 1; 2 ]) in
   let node =
     Cache.Node.collect
-      (module Int_key)
+      (module Int)
       ~keys:(Cache.Var.watch keys)
       ~f:(fun k -> Cache.Node.const cache (k * 10))
   in
@@ -766,14 +751,14 @@ let%expect_test "collect: reading one key cuts off when a different key changes"
   let cache = Cache.create () in
   let keys = Cache.Var.create cache (keys_of [ 1; 2 ]) in
   let child_vars : (int, int ref Cache.Var.t) Hashtbl.t =
-    Hashtbl.create (module Int_key) 16
+    Hashtbl.create (module Int) 16
   in
   let f k =
     let v = Cache.Var.create cache (ref (k * 10)) in
     Hashtbl.set child_vars ~key:k ~data:v;
     Cache.Var.watch v
   in
-  let node = Cache.Node.collect (module Int_key) ~keys:(Cache.Var.watch keys) ~f in
+  let node = Cache.Node.collect (module Int) ~keys:(Cache.Var.watch keys) ~f in
   let extracts = ref 0 in
   let one =
     Cache.Node.map node ~f:(fun map ->
