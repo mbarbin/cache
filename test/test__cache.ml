@@ -36,7 +36,7 @@ let%expect_test "Cache.clock: a fresh cache reads Stamp.zero" =
   let cache = Cache.create () in
   require_equal
     (module Cache.Private.Clock.Stamp)
-    (Cache.Private.Clock.now (Cache.Private.clock cache))
+    (Cache.Private.Clock.settle (Cache.Private.clock cache))
     Cache.Private.Clock.Stamp.zero;
   (* @mdexp.end *)
   ()
@@ -46,22 +46,24 @@ let%expect_test "Cache.clock: a fresh cache reads Stamp.zero" =
 
    ## The clock handed back is the live one
 
-   `Cache.clock` returns the clock that `Var.set` itself advances, not a
-   copy or a snapshot of it. Tick it by hand, with no `Var.set` involved
-   anywhere: *)
+   `Cache.Private.clock` returns the clock `Var.set` itself announces
+   writes on, not a copy or a snapshot of it. Take a reading by hand,
+   with no `Var.set` involved anywhere --- `reserve` to reserve one,
+   `settle` to settle onto it the way a recomputing node does: *)
 
-let%expect_test "Cache.clock: ticking it directly counts toward a later Var.set's stamp" =
+let%expect_test "Cache.clock: a reading taken by hand counts toward a later Var.set" =
   (* @mdexp.code *)
   let cache = Cache.create () in
+  let clock = Cache.Private.clock cache in
   let v = Cache.Var.create cache 1 in
-  ignore
-    (Cache.Private.Clock.tick (Cache.Private.clock cache) : Cache.Private.Clock.Stamp.t);
+  ignore (Cache.Private.Clock.reserve clock : Cache.Private.Clock.Stamp.t);
+  ignore (Cache.Private.Clock.settle clock : Cache.Private.Clock.Stamp.t);
   (* @mdexp
 
      Then write the var once. Its stamp comes out as the *second*
-     reading, not the first: the manual tick was a real write to the one
-     clock `set` advances too. Had `clock` handed back a side channel of
-     its own, this would print 1. *)
+     reading, not the first: the reading taken by hand was taken off the
+     one clock `set` announces on too. Had `clock` handed back a side
+     channel of its own, this would print 1. *)
   (* @mdexp.code *)
   Cache.Var.set v 2;
   print_stamp (Cache.Private.var_stamp v);
@@ -69,3 +71,12 @@ let%expect_test "Cache.clock: ticking it directly counts toward a later Var.set'
   (* @mdexp.end *)
   ()
 ;;
+
+(* @mdexp
+
+   ## One reading per run of writes
+
+   The clock a cache holds does not hand out a reading per write; it
+   hands out one per *phase* of writes. That is a property of the clock
+   rather than of the cache, and [Clock](test__clock.md) is where it is
+   set out and pinned. *)

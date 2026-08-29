@@ -182,8 +182,10 @@ let disconnect (type a p) (t : a t) (parent : p t) =
    cheaply), reconnect to each of them via {!connect}, and ask the shape
    for the precise [stale] verdict (or, on the first call, when [cached]
    is still empty, run [compute] regardless). [checked_at] moves to the
-   clock's current reading ([Clock.now], read-only — forcing a node is not
-   itself a write) whenever [compute] runs, including when this node's own
+   reading {!Clock.settle} lands on — the one the writes since the last
+   recompute reserved, which forcing a node settles the world onto
+   rather than reserving anything of its own — whenever [compute] runs,
+   including when this node's own
    [equal] goes on to decide the result doesn't count as a change: without
    that, a parent that moved once would keep testing as past this node on
    every later look, re-firing [f] every time instead of settling. [stamp] — what a *child's own future* [refresh] compares against
@@ -342,13 +344,13 @@ let rec refresh : type a. a t -> a * Clock.Stamp.t =
      | Some _ when not stale -> ()
      | previous ->
        let value = compute () in
-       let now = Clock.now t.cache.clock in
-       t.checked_at <- now;
+       let reading = Clock.settle t.cache.clock in
+       t.checked_at <- reading;
        (match previous with
         | Some previous when t.equal previous value -> ()
         | _ ->
           t.cached <- Some value;
-          t.stamp <- now));
+          t.stamp <- reading));
     t.is_invalidated <- false);
   match t.cached with
   | Some value -> value, t.stamp
