@@ -21,7 +21,7 @@ let set (t : 'a t) value =
     t.cache
     ~msg:"Cache.Var.set: a var cannot be set while a node is being computed";
   t.value <- value;
-  t.stamp <- Clock.tick t.cache.clock;
+  t.stamp <- Clock.reserve t.cache.clock;
   (* Every currently-connected watcher gets told, unconditionally — [Var]
      has no cutoff of its own (unlike [Node.t], every [set] counts, even
      to the same value; it's the watching node's own default-[phys_equal]

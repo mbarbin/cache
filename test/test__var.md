@@ -10,7 +10,7 @@ on a var means watching it --- see [Node](test__node.md).
 
 ## create
 
-Creating a var is not a write. It does not advance the clock, and the
+Creating a var is not a write. It reserves no reading, and the
 var starts at `Stamp.zero` --- the reading that means "never
 written".
 
@@ -43,8 +43,8 @@ let a = Cache.Var.create cache "a0" in
 Cache.Var.set a "a1";
 ```
 
-`cache` is now at reading 1. A var created at this point still
-starts at zero:
+`cache` is announcing writes at reading 1 now. A var created at
+this point still starts at zero:
 
 ```ocaml
 let b = Cache.Var.create cache "b0" in
@@ -56,8 +56,12 @@ require_equal
 
 ## set
 
-`set` replaces the value and advances the shared clock by one; that
-new reading becomes the var's stamp. Two writes, two readings:
+`set` replaces the value and stamps the var with the reading the
+shared clock is currently announcing writes by. A second write with
+nothing pulled in between belongs to the same run and carries the
+same reading --- no node looked between the two, so nothing is in a
+position to tell them apart. See
+[Clock](test__clock.md#next-reserves-one-reading-for-a-whole-phase).
 
 ```ocaml
 let cache = Cache.create () in
@@ -69,12 +73,25 @@ print_stamp (Cache.Private.var_stamp v);
 Cache.Var.set v 3;
 require_equal (module Int) (Cache.Var.peek v) 3;
 print_stamp (Cache.Private.var_stamp v);
+[%expect {| 1 |}];
+```
+
+Pulling a node built on the var is what closes that reading off: the
+node stamps itself with it, and from then on it is a reading
+something has been compared against. The write after that starts a
+run of its own, and is announced by a reading of its own:
+
+```ocaml
+let n = Cache.Node.map (Cache.Var.watch v) ~f:(fun x -> x * 10) in
+require_equal (module Int) (Cache.Node.value n) 30;
+Cache.Var.set v 4;
+print_stamp (Cache.Private.var_stamp v);
 [%expect {| 2 |}];
 ```
 
 The clock is shared; the stamps are not. Writing one var moves the
-clock, which every var in the cache can see, but leaves every other
-var's own stamp exactly where it was. That is what lets a node compare
+clock on, which every var in the cache can see, but leaves every
+other var's own stamp exactly where it was. That is what lets a node compare
 its parent's stamp against its own last look and conclude nothing
 relevant happened, even though the cache as a whole has moved on.
 

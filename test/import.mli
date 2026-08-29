@@ -7,7 +7,8 @@
 (*_ Small private prelude (no [public_name] — nothing outside this project
   depends on it) for the handful of things these tests need beyond plain
   [Stdlib]: labelled [List]/[String] aliases, [Int]/[Bool]/[String]
-  extended with [to_dyn] (for {!require_equal}), [print_dyn],
+  extended with [to_dyn] (for {!require_equal}), [Int] extended further
+  into the key module [Cache.Node.collect] asks for, [print_dyn],
   [phys_equal], and [require_equal]/[require_does_raise]. Not a
   general-purpose stdlib extension — grow it only when a test itself
   needs something new. *)
@@ -24,10 +25,34 @@ module String : sig
   val to_dyn : t -> Dyn.t
 end
 
+(** Like {!String} and {!Bool} either side of it, this re-exports
+    [Stdlib.Int] wholesale, so that everything the standard library
+    already says about an integer stays reachable through the prelude.
+    What follows the include is what the tests ask of an integer beyond
+    that — including a [compare] that shadows [Stdlib.Int]'s. *)
 module Int : sig
   include module type of Int
 
+  (** [equal], from the include above, and [to_dyn] are what
+      {!require_equal} needs. *)
+
   val to_dyn : t -> Dyn.t
+
+  (** [hash], [compare] and [comparator_witness] are what
+      [Cache.Node.collect] asks of a key type: [equal] and [hash] for the
+      table it memoizes children in, [compare] and [comparator_witness]
+      for the key [Set.t] it reads and the [Map.t] it returns. Passing
+      [(module Int)] to [collect], to [Hashtbl.create] and to
+      [Set.of_list] alike is what keeps the chapters testing [collect]
+      over one notion of an integer key rather than over a key module
+      each. [compare] here shadows the [int]-returning one included
+      above: a key module is asked for an [Ordering.t], and no test
+      wants the other. *)
+
+  type comparator_witness
+
+  val hash : t -> int
+  val compare : t -> t -> Ordering.t
 end
 
 module Bool : sig

@@ -20,5 +20,14 @@ module Stamp : sig
 end
 
 val create : unit -> t
-val now : t -> Stamp.t
-val tick : t -> Stamp.t
+
+(*_ Settles on the reading the writes since the last recompute reserved,
+  and returns it. Named for the transition, not for the reading: there
+  is no way to look at this clock without moving it. See [clock.ml] for
+  why committing here, at the moment a node stamps itself, is what makes
+  {!reserve}'s sharing safe. *)
+val settle : t -> Stamp.t
+
+(*_ The reading a write announces itself by. Shared with every other
+  write up to the next {!settle}, rather than one taken per write. *)
+val reserve : t -> Stamp.t

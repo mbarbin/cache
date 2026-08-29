@@ -6,28 +6,28 @@
 
 open! Import
 
-(*_ [var]/[node]/[packed]/[shape], defined together in one recursive block,
-  are what let a var's [children] hold real node pointers instead of the
-  invalidating closures an earlier version of this used: a var is watched
-  by nodes of many different result types, so [children] needs the same
-  existential [packed] a node's own [children] does — [var]/[node] being
-  in two separate files ([var.ml] can't depend on [node.ml]'s type, which
-  itself depends on [var.ml]'s) is exactly what made that impossible
-  before this module existed to give both a common home.
+(* [var]/[node]/[packed]/[shape], defined together in one recursive block,
+   are what let a var's [children] hold real node pointers instead of the
+   invalidating closures an earlier version of this used: a var is watched
+   by nodes of many different result types, so [children] needs the same
+   existential [packed] a node's own [children] does — [var]/[node] being
+   in two separate files ([var.ml] can't depend on [node.ml]'s type, which
+   itself depends on [var.ml]'s) is exactly what made that impossible
+   before this module existed to give both a common home.
 
-  Nothing here is hidden: [types.mli] mirrors this file's definitions
-  field for field, manifest rather than abstract, so [var.ml] and
-  [node.ml] can both reach in and read/write each other's fields directly
-  (a var pushing straight onto a watching node's [children], say) without
-  a round trip through function calls on either side. That's a deliberate
-  trade — the two modules give up hiding their representation from each
-  other — not a general loosening: [Cache.Var.t]/[Cache.Node.t] are still
-  exactly as opaque to a caller of the library as before, since
-  [cache.mli] re-abstracts both from scratch and never mentions [Types]
-  at all. The per-field "what this means" documentation lives here, next
-  to the fields; the "how the whole thing behaves" documentation —
-  [refresh]/[connect]/[disconnect]/[invalidate] — lives in [node.ml],
-  which is where that behavior actually happens. *)
+   Nothing here is hidden: [types.mli] mirrors this file's definitions
+   field for field, manifest rather than abstract, so [var.ml] and
+   [node.ml] can both reach in and read/write each other's fields directly
+   (a var pushing straight onto a watching node's [children], say) without
+   a round trip through function calls on either side. That's a deliberate
+   trade — the two modules give up hiding their representation from each
+   other — not a general loosening: [Cache.Var.t]/[Cache.Node.t] are still
+   exactly as opaque to a caller of the library as before, since
+   [cache.mli] re-abstracts both from scratch and never mentions [Types]
+   at all. The per-field "what this means" documentation lives here, next
+   to the fields; the "how the whole thing behaves" documentation —
+   [refresh]/[connect]/[disconnect]/[invalidate] — lives in [node.ml],
+   which is where that behavior actually happens. *)
 
 (* [Collect]'s key needs all four: [equal]/[hash] to build and probe
    [table] (a [Hashtbl.t], read [node.ml]'s own doc for why that stays a

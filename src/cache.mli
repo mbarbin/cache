@@ -186,7 +186,7 @@ module Var : sig
   type 'a t
 
   (** [create cache v] is a var holding [v]. Creating one is not a write:
-      it does not advance the clock. *)
+      it reserves no reading. *)
   val create : cache -> 'a -> 'a t
 
   (** The value currently held, read directly: no dependency recorded, no
@@ -242,12 +242,21 @@ module Private : sig
       val to_dyn : t -> Dyn.t
     end
 
-    (** The current reading. Does not advance the clock. *)
-    val now : t -> Stamp.t
+    (** Settles the world onto whatever {!reserve} last reserved, and
+        returns that reading — which is what a node stamps itself with
+        when it recomputes. Named for the transition rather than for
+        the reading it hands back, because there is no way to look at
+        this clock without moving it: it advances up to the outstanding
+        reservation, never past one. Within the library only a node
+        about to stamp itself calls this. *)
+    val settle : t -> Stamp.t
 
-    (** Advances the clock by one and returns the new reading. Within the
-        library only {!Var.set} and {!Computation.invalidate} call this. *)
-    val tick : t -> Stamp.t
+    (** The reading a write announces itself by. Every write up to the
+        next {!settle} shares it, rather than each minting one of its own:
+        two writes with no recompute between them are two writes nothing
+        in the graph is in a position to tell apart. Within the library
+        only {!Var.set} and {!Computation.invalidate} call this. *)
+    val reserve : t -> Stamp.t
   end
 
   (** The clock [t] shares. *)

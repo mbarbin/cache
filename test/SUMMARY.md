@@ -5,6 +5,7 @@
 # Modules
 
 - [Cache](test__cache.md)
+- [Clock](test__clock.md)
 - [Var](test__var.md)
 - [Node](test__node.md)
 - [The mapN family](test__mapn.md)
@@ -13,6 +14,7 @@
 # Concepts
 
 - [Invalid uses](invalid_uses.md)
+- [Clock discipline](clock_discipline.md)
 
 # The test suite itself
 

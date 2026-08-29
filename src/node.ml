@@ -6,55 +6,55 @@
 
 open! Import
 
-(*_ [t] is [Types.node] — see [types.ml] for the field-by-field layout of
-  [t]/[shape]/[packed] and why they and [Var.t] are defined together
-  there rather than each in its own file. [refresh] is the one recursive
-  function that pattern-matches on [shape] and knows how to recompute
-  each kind of node, instead of that logic being reimplemented by hand
-  inside each constructor's own closure.
+(* [t] is [Types.node] — see [types.ml] for the field-by-field layout of
+   [t]/[shape]/[packed] and why they and [Var.t] are defined together
+   there rather than each in its own file. [refresh] is the one recursive
+   function that pattern-matches on [shape] and knows how to recompute
+   each kind of node, instead of that logic being reimplemented by hand
+   inside each constructor's own closure.
 
-  Two different questions drive a {!refresh}, one cheap and one precise,
-  and keeping them apart is what makes a read between two writes nearly
-  free:
+   Two different questions drive a {!refresh}, one cheap and one precise,
+   and keeping them apart is what makes a read between two writes nearly
+   free:
 
-  - "Might I be stale at all?" is [is_invalidated], a plain bool. A write
-    ({!Var.set}) or an external {!Cache.Computation.invalidate} flips it
-    on every node currently reachable from it — the whole subgraph, right
-    away, via {!invalidate} walking [children] — because at that point
-    nothing is known yet about whether any of it will turn out to
-    matter. [refresh] short-circuits to the cached value with no shape
-    inspected and no parent touched whenever this is [false] — which,
-    between writes, is every read: one bool test, however deep the chain
-    of parents above it.
-  - "Do I *actually* need to recompute?" — once [is_invalidated] says
-    "maybe" — is the precise, per-shape comparison: refresh whichever
-    parents this node reads (recursively — a parent that's already
-    resolved returns just as cheaply, since it went through the same
-    two-step check) and compare each one's [stamp] against [checked_at]. This is what keeps a cutoff a few levels up
-    still stopping a downstream recompute (see the "cutoff stops a
-    downstream recompute" test): [is_invalidated] alone can't tell — it
-    was flipped on both the cutoff-absorbing node *and* everything below
-    it, eagerly, before either one had a chance to run — but [checked_at]
-    can, because it isn't touched at all when a parent's cutoff decides
-    nothing really changed.
+   - "Might I be stale at all?" is [is_invalidated], a plain bool. A write
+     ({!Var.set}) or an external {!Cache.Computation.invalidate} flips it
+     on every node currently reachable from it — the whole subgraph, right
+     away, via {!invalidate} walking [children] — because at that point
+     nothing is known yet about whether any of it will turn out to
+     matter. [refresh] short-circuits to the cached value with no shape
+     inspected and no parent touched whenever this is [false] — which,
+     between writes, is every read: one bool test, however deep the chain
+     of parents above it.
+   - "Do I *actually* need to recompute?" — once [is_invalidated] says
+     "maybe" — is the precise, per-shape comparison: refresh whichever
+     parents this node reads (recursively — a parent that's already
+     resolved returns just as cheaply, since it went through the same
+     two-step check) and compare each one's [stamp] against [checked_at]. This is what keeps a cutoff a few levels up
+     still stopping a downstream recompute (see the "cutoff stops a
+     downstream recompute" test): [is_invalidated] alone can't tell — it
+     was flipped on both the cutoff-absorbing node *and* everything below
+     it, eagerly, before either one had a chance to run — but [checked_at]
+     can, because it isn't touched at all when a parent's cutoff decides
+     nothing really changed.
 
-  [children] is a live edge only while a node is actually resolved (not
-  invalidated) and worth telling: {!connect} (re-)adds a node to a
-  parent's [children] the moment it finishes checking that parent
-  ("refresh reconnects"), and {!invalidate} unconditionally empties a
-  node's own [children] the moment it cascades through it ("invalidate
-  disconnects") — a node that's currently invalidated is, for exactly as
-  long as it stays that way, absent from every parent's [children]. That's
-  what keeps this from leaking: a long-lived var or node doesn't hold a
-  downstream node alive forever just because it was read once — the very
-  next write that reaches it drops the edge, and if nothing else
-  references that downstream node, it's collectible from there (bounded
-  by "until this parent's next write", not "forever"). A node picks the
-  edge back up itself the next time it's actually pulled and resolves —
-  nothing needs to do that on its behalf. A var's own [children] is the
-  same discipline one level up: it holds real node pointers too (see
-  [types.ml]), connected the same way, disconnected in one move by every
-  {!Var.set}. *)
+   [children] is a live edge only while a node is actually resolved (not
+   invalidated) and worth telling: {!connect} (re-)adds a node to a
+   parent's [children] the moment it finishes checking that parent
+   ("refresh reconnects"), and {!invalidate} unconditionally empties a
+   node's own [children] the moment it cascades through it ("invalidate
+   disconnects") — a node that's currently invalidated is, for exactly as
+   long as it stays that way, absent from every parent's [children]. That's
+   what keeps this from leaking: a long-lived var or node doesn't hold a
+   downstream node alive forever just because it was read once — the very
+   next write that reaches it drops the edge, and if nothing else
+   references that downstream node, it's collectible from there (bounded
+   by "until this parent's next write", not "forever"). A node picks the
+   edge back up itself the next time it's actually pulled and resolves —
+   nothing needs to do that on its behalf. A var's own [children] is the
+   same discipline one level up: it holds real node pointers too (see
+   [types.ml]), connected the same way, disconnected in one move by every
+   {!Var.set}. *)
 
 open Types
 
@@ -182,8 +182,10 @@ let disconnect (type a p) (t : a t) (parent : p t) =
    cheaply), reconnect to each of them via {!connect}, and ask the shape
    for the precise [stale] verdict (or, on the first call, when [cached]
    is still empty, run [compute] regardless). [checked_at] moves to the
-   clock's current reading ([Clock.now], read-only — forcing a node is not
-   itself a write) whenever [compute] runs, including when this node's own
+   reading {!Clock.settle} lands on — the one the writes since the last
+   recompute reserved, which forcing a node settles the world onto
+   rather than reserving anything of its own — whenever [compute] runs,
+   including when this node's own
    [equal] goes on to decide the result doesn't count as a change: without
    that, a parent that moved once would keep testing as past this node on
    every later look, re-firing [f] every time instead of settling. [stamp] — what a *child's own future* [refresh] compares against
@@ -342,13 +344,13 @@ let rec refresh : type a. a t -> a * Clock.Stamp.t =
      | Some _ when not stale -> ()
      | previous ->
        let value = compute () in
-       let now = Clock.now t.cache.clock in
-       t.checked_at <- now;
+       let reading = Clock.settle t.cache.clock in
+       t.checked_at <- reading;
        (match previous with
         | Some previous when t.equal previous value -> ()
         | _ ->
           t.cached <- Some value;
-          t.stamp <- now));
+          t.stamp <- reading));
     t.is_invalidated <- false);
   match t.cached with
   | Some value -> value, t.stamp

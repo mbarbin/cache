@@ -19,6 +19,20 @@ end
 module Int = struct
   include Int
 
+  (* Everything [Cache.Node.collect] asks of a key type, answered here
+     rather than by a key module each chapter defines for itself: [hash]
+     for the [Hashtbl.t] [collect] memoizes children in, and [compare]
+     plus [comparator_witness] for the [Set.t] of keys it reads and the
+     [Map.t] it returns. [Stdlib.Int]'s own [int]-returning [compare] is
+     shadowed rather than kept alongside — the key signature calls for an
+     [Ordering.t], and no test wants the other one. With [equal] (from
+     [Stdlib.Int]) and [to_dyn] below, one module then answers for every
+     role a test needs of an integer: {!require_equal}, the hash table,
+     the key set, and [collect] itself. *)
+  type comparator_witness
+
+  let hash = Stdlib.Hashtbl.hash
+  let compare a b = Ordering.of_int (Stdlib.Int.compare a b)
   let to_dyn = Dyn.int
 end
 

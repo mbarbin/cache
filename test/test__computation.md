@@ -145,7 +145,14 @@ let comp =
   Cache.Computation.create cache ~f:(fun () ->
     (match !self with
      | None -> ()
-     | Some comp -> Cache.Computation.invalidate comp);
+     (* [invalidate] raises every time this arm is reached — that is
+        what the test is for — so the arm is entered on every run and
+        never returns. Bisect's point sits on the arm's out edge rather
+        than its entry, so it stays uncovered however often the arm
+        runs: [@coverage off] on reached code here, unlike the
+        dead-code ones in [src/node.ml]. The [None] arm needs none —
+        it returns, and the read after [self] is cleared covers it. *)
+     | Some comp -> Cache.Computation.invalidate comp [@coverage off]);
     0)
 in
 self := Some comp;

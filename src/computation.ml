@@ -20,15 +20,20 @@ let create cache ~(f : unit -> 'a) : 'a t =
       ~msg:
         "Cache.Computation.invalidate: a computation cannot be invalidated while a node \
          is being computed";
-    (* The tick is what makes the next recompute visible downstream. A
-       computation has no parent whose stamp could move, so when its node
-       re-runs [f] it stamps itself with whatever [Clock.now] reads at
-       that moment. Without a tick here, and with nothing else having
-       written meanwhile, that reading is the very one a child already
-       recorded in its own [checked_at] — so the child would compare the
-       two, find nothing greater, and absorb a change that really did
-       happen. *)
-    ignore (Clock.tick cache.clock : Clock.Stamp.t);
+    (* Reserving the next reading is what makes the recompute to come
+       visible downstream. A computation has no parent whose stamp could
+       move, so when its node re-runs [f] it stamps itself with whatever
+       [Clock.settle] settles on at that moment. Without this, and with
+       nothing else having written meanwhile, that reading is the very
+       one a child already recorded in its own [checked_at] — so the
+       child would compare the two, find nothing greater, and absorb a
+       change that really did happen.
+
+       The reservation is shared with every other write up to the next
+       recompute: invalidating twice over, or invalidating alongside a
+       {!Var.set}, costs one reading between them rather than one
+       apiece (see [clock.ml]). *)
+    ignore (Clock.reserve cache.clock : Clock.Stamp.t);
     Node.Private.invalidate node
   in
   { node; invalidate }
