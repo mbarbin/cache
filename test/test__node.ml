@@ -678,9 +678,9 @@ let%expect_test "collect: an unrelated var's write doesn't force a recompute" =
       incr recomputes;
       pairs)
   in
-  ignore (Cache.Node.value node : (int, int, Int.comparator_witness) Map.t);
+  ignore (Cache.Node.value node : int Map.M(Int).t);
   Cache.Var.set unrelated "y";
-  ignore (Cache.Node.value node : (int, int, Int.comparator_witness) Map.t);
+  ignore (Cache.Node.value node : int Map.M(Int).t);
   require_equal (module Int) !creates 1;
   require_equal (module Int) !recomputes 1;
   (* @mdexp.end *)
