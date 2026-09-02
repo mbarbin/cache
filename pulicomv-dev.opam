@@ -11,11 +11,11 @@ depends: [
   "ocaml" {>= "5.2"}
   "ocamlformat" {= "0.29.0"}
   "bisect_ppx" {>= "2.8.3"}
-  "odoc" {>= "2.0.0"}
   "ppx_expect" {>= "v0.17"}
   "ppx_js_style" {>= "v0.17"}
   "pulicomv" {= version}
   "pulicomv-tests" {= version}
+  "odoc" {>= "2.4.4"}
 ]
 build: [
   ["dune" "subst"] {dev}

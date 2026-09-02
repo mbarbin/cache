@@ -11,8 +11,8 @@ depends: [
   "ocaml" {>= "5.2"}
   "dyn" {>= "3.20"}
   "nofunc-htbl"
-  "nofunc-set"
   "nofunc-map"
+  "nofunc-set"
   "ordering" {>= "3.20"}
   "odoc" {with-doc}
 ]

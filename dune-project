@@ -23,6 +23,7 @@
 ;; same nofunc-keyed repo; a dune-project-level pin (unlike a
 ;; dune-workspace one) applies automatically to every lock_dir, so it
 ;; doesn't need repeating in each dune-workspace.5.X file.
+
 (pin
  (url "git+https://github.com/mbarbin/nofunc-keyed.git")
  (package
@@ -41,8 +42,8 @@
   (dyn
    (>= 3.20))
   nofunc-htbl
-  nofunc-set
   nofunc-map
+  nofunc-set
   (ordering
    (>= 3.20))))
 
@@ -52,17 +53,17 @@
  (depends
   (ocaml
    (>= 5.2))
-  (pulicomv
-   (= :version))
   (dyn
    (>= 3.20))
   nofunc-htbl
-  nofunc-set
   nofunc-map
+  nofunc-set
   (ordering
    (>= 3.20))
   (ppx_expect
-   (>= v0.17))))
+   (>= v0.17))
+  (pulicomv
+   (= :version))))
 
 (package
  (name pulicomv-dev)
@@ -75,8 +76,6 @@
    (= 0.29.0))
   (bisect_ppx
    (>= 2.8.3))
-  (odoc
-   (>= 2.0.0))
   (ppx_expect
    (>= v0.17))
   (ppx_js_style
@@ -84,4 +83,6 @@
   (pulicomv
    (= :version))
   (pulicomv-tests
-   (= :version))))
+   (= :version))
+  (odoc
+   (>= 2.4.4))))
